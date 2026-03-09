@@ -1,0 +1,148 @@
+---
+title: "TBA_Faktor"
+author: "İbrahim Emin İpek"
+date: "2025-12-12"
+output: html_document
+---
+
+```{r}
+library(readxl)
+data <- read_excel("C:/Users/User/Desktop/cda_data_verianalizi/TBA VE Faktör Analizi/duzenli_data.xlsx")
+View(data)
+```
+
+#Temel Bileşen analizi
+
+```{r}
+# Gerekli kütüphaneler
+library(readxl)
+library(psych)
+library(corrplot)
+library(Hmisc)
+
+```
+
+```{r}
+
+# Seçilen değişkenler
+selected_vars <- data[, c("Nabiz", "Stress_Seviyesi_Biosensor", "Stress_Seviyesi_Bildirim", "Kan_Basinci_Diyastolik", "Kan_Basinci_Sistolik")]
+
+# Eksik değerleri temizleme
+selected_vars <- na.omit(selected_vars)
+
+# Veriyi kontrol etme
+summary(selected_vars)
+
+```
+
+```{r}
+# Korelasyon matrisi
+cor_matrix <- cor(selected_vars)
+
+# Korelasyon matrisini görselleştirme
+corrplot(cor_matrix, method = "circle", type = "upper")
+print(cor_matrix)
+
+```
+
+```{r}
+# Korelasyon matrisinin determinantı
+det_cor_matrix <- det(cor_matrix)
+print(paste("Korelasyon Matrisinin Determinantı:", det_cor_matrix))
+
+```
+```{r}
+# KMO testi
+kmo_result <- KMO(selected_vars)
+print("KMO Test Sonuçları:")
+print(kmo_result)
+
+# Bartlett küresellik testi
+bartlett_result <- cortest.bartlett(cor_matrix, n = nrow(selected_vars))
+print("Bartlett Küresellik Testi Sonuçları:")
+print(bartlett_result)
+
+```
+
+```{r}
+#Temel Bilesenler Analizi- princomp fonksiyonu
+data <- prcomp( ~., data=selected_vars[,-1], scale=TRUE) # korelasyon matrisi icin scale=TRUE yaz 
+data$rotation #loadings
+#fit.pca$x #scores
+
+```
+
+```{r}
+#Bilesen sayisina karar vermek
+summary(data)
+(data$sdev)^2 #ozdegerler
+```
+
+
+```{r}
+#Scree plot
+plot(data)
+plot(data,type="line")
+```
+
+
+```{r}
+# 3 bileşene karar verildi
+data$rotation[,1:3]
+```
+
+
+```{r}
+data$rotation[,2]*data$sdev[2]
+```
+
+
+```{r}
+
+selected_vars$comp1 <- data$x[, 1]  # 1. bileşen
+selected_vars$comp2 <- data$x[, 2]  # 2. bileşen
+selected_vars$comp3 <- data$x[, 3]  # 3. bileşen
+
+selected_vars$index <- 1:nrow(data$x) 
+selected_vars$total_score <- selected_vars$comp1 + selected_vars$comp2 + selected_vars$comp3
+print(selected_vars)
+```
+```{r}
+library(factoextra)
+# PCA analizi
+pca_result <- prcomp(selected_vars, scale = TRUE)
+
+# Değişken yükleme grafiği
+fviz_pca_var(pca_result,
+             col.var = "contrib",  # Değişkenlerin katkısına göre renklendirme
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), # Renk gradyanı
+             repel = TRUE)  # Etiketlerin çakışmasını önleme
+```
+
+
+```{r}
+# faktör analizi
+faktorsuz <- tryCatch({
+  fa(selected_vars, nfactors = 2, rotate = "none")
+}, error = function(e) {
+  cat(" Faktor Analizinde Hata:", e$message, "\n")
+  return(NULL)
+})
+
+# Sonuçları yazdır
+if (!is.null(faktorsuz)) {
+  print(" Faktor Analizi Yukleri:")
+  print(faktorsuz$loadings, digits = 2, cutoff = 0.3, sort = TRUE)
+}
+
+
+```
+```{r}
+library(psych)
+if (!is.null(faktorsuz)) {
+  fa.diagram(faktorsuz)
+}
+```
+
+
+

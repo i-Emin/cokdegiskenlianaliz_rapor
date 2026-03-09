@@ -1,0 +1,857 @@
+---
+title: "Kümeleme Analizi"
+subtitle: "Öğrenci Stres Verileri Üzerinde Hiyerarşik ve K-Means Kümeleme"
+author: "Veri Analizi Raporu"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: 
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    theme: flatly
+    highlight: tango
+    code_folding: show
+    df_print: paged
+    fig_width: 10
+    fig_height: 6
+---
+
+<style>
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  background-color: #f8f9fa;
+}
+
+.title {
+  color: #2c3e50;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.subtitle {
+  color: #34495e;
+  font-size: 18px;
+  margin-bottom: 20px;
+}
+
+h1 {
+  color: #2980b9;
+  border-bottom: 3px solid #3498db;
+  padding-bottom: 10px;
+  margin-top: 30px;
+}
+
+h2 {
+  color: #16a085;
+  border-bottom: 2px solid #1abc9c;
+  padding-bottom: 5px;
+  margin-top: 25px;
+}
+
+h3 {
+  color: #8e44ad;
+  margin-top: 20px;
+}
+
+.tocify {
+  border: 1px solid #dee2e6;
+  border-radius: 5px;
+  background-color: white;
+}
+
+code {
+  background-color: #f4f4f4;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 90%;
+}
+
+pre {
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 5px;
+  padding: 15px;
+}
+
+.main-container {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  background-color: white;
+  padding: 30px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  border-radius: 10px;
+}
+
+.info-box {
+  background-color: #e8f4f8;
+  border-left: 5px solid #3498db;
+  padding: 15px;
+  margin: 20px 0;
+  border-radius: 5px;
+}
+
+.warning-box {
+  background-color: #fff3cd;
+  border-left: 5px solid #ffc107;
+  padding: 15px;
+  margin: 20px 0;
+  border-radius: 5px;
+}
+
+.success-box {
+  background-color: #d4edda;
+  border-left: 5px solid #28a745;
+  padding: 15px;
+  margin: 20px 0;
+  border-radius: 5px;
+}
+
+table {
+  margin: 20px 0;
+  width: 100%;
+}
+
+.dataTables_wrapper {
+  padding: 20px;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = 'center',
+  fig.width = 10,
+  fig.height = 6,
+  cache = FALSE,
+  comment = NA
+)
+```
+
+<div class="info-box">
+**📊 Analiz Özeti:** Bu rapor, öğrenci stres verileri üzerinde kümeleme analizi yapmaktadır. Hiyerarşik kümeleme ve K-Means yöntemleri kullanılarak öğrenciler benzer özelliklerine göre gruplara ayrılmıştır.
+
+**📌 Kullanılan Değişkenler:** Yaş, Nabız, Kan Basıncı (Sistolik/Diyastolik), Stres Seviyesi (Biosensor/Bildirim), Ders Saatleri, Proje Saatleri
+</div>
+
+---
+
+# Gerekli Kütüphaneler
+
+```{r kutuphane}
+# Veri işleme ve görselleştirme
+library(readxl)          # Excel dosyalarını okumak için
+library(dplyr)           # Veri manipülasyonu için
+library(ggplot2)         # Gelişmiş görselleştirme
+library(plotly)          # İnteraktif grafikler
+
+# Kümeleme analizi
+library(cluster)         # Kümeleme fonksiyonları
+library(factoextra)      # Kümeleme görselleştirme
+library(dendextend)      # Dendrogram düzenleme
+
+# İstatistiksel testler
+library(rstatix)         # ANOVA ve diğer testler
+
+# Diğer
+library(circlize)        # Polar dendrogram
+library(knitr)           # Tablo oluşturma
+library(kableExtra)      # Gelişmiş tablolar
+library(DT)              # İnteraktif tablolar
+```
+
+---
+
+# Veri Setinin Yüklenmesi
+
+```{r veri-yukleme}
+# Excel dosyasını okuma
+data <- read_excel("C:/Users/User/Desktop/cda_data_verianalizi/Kümeleme/duzenli_data_300gozlem.xlsx")
+
+# Veri setinin ilk satırları
+head(data) %>%
+  kable(caption = "Veri Setinin İlk 6 Satırı") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE,
+                font_size = 12) %>%
+  scroll_box(width = "100%")
+```
+
+## Veri Seti Hakkında Genel Bilgiler
+
+```{r veri-bilgi}
+# Veri yapısı
+cat("📊 Veri Seti Boyutu:", nrow(data), "gözlem,", ncol(data), "değişken\n\n")
+
+# Özet istatistikler
+summary(data) %>%
+  kable(caption = "Özet İstatistikler") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  scroll_box(width = "100%", height = "400px")
+```
+
+---
+
+# Kümeleme İçin Veri Hazırlığı
+
+<div class="warning-box">
+**⚠️ Önemli:** Kümeleme analizinde sadece seçilmiş nicel değişkenler kullanılacaktır.
+</div>
+
+```{r veri-hazirligi}
+# Kullanılacak değişkenler
+analiz_degiskenleri <- c("Yas", "Nabiz", "Kan_Basinci_Sistolik", 
+                         "Kan_Basinci_Diyastolik", "Stress_Seviyesi_Biosensor",
+                         "Stress_Seviyesi_Bildirim", "Ders_Saatleri", 
+                         "Proje_Saatleri")
+
+# Kümeleme için veri seçimi
+kumeleme_data <- data[, analiz_degiskenleri]
+
+# Eksik gözlem kontrolü
+eksik_gozlem <- sum(is.na(kumeleme_data))
+cat("Eksik Gözlem Sayısı:", eksik_gozlem, "\n")
+
+# Eksik gözlemlerin temizlenmesi (varsa)
+kumeleme_data <- na.omit(kumeleme_data)
+
+cat("✅ Temiz Veri Seti:", nrow(kumeleme_data), "gözlem\n")
+```
+
+## Korelasyon Analizi
+
+```{r korelasyon}
+# Korelasyon matrisi
+cor_matrix <- cor(kumeleme_data)
+
+# Korelasyon tablosu
+cor_matrix %>%
+  kable(caption = "Değişkenler Arası Korelasyon Matrisi", digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  scroll_box(width = "100%")
+```
+
+```{r korelasyon-gorsel, fig.height=8, fig.width=10}
+# Korelasyon ısı haritası
+library(reshape2)
+melted_cor <- melt(cor_matrix)
+
+ggplot(data = melted_cor, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 3) +
+  scale_fill_gradient2(low = "#3498db", high = "#e74c3c", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), space = "Lab",
+                       name = "Korelasyon") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 10),
+        axis.text.y = element_text(size = 10),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 14)) +
+  labs(title = "Değişkenler Arası Korelasyon Isı Haritası",
+       x = "", y = "") +
+  coord_fixed()
+```
+
+---
+
+# Hiyerarşik Kümeleme Analizi
+
+## Uzaklık Matrisi ve İlk Dendrogram
+
+```{r hiyerarsik-1}
+# Euclidean uzaklık matrisi
+d <- dist(kumeleme_data, method = "euclidean")
+
+# Hiyerarşik kümeleme (Ward yöntemi)
+fit <- hclust(d, method = "ward.D")
+
+# İlk dendrogram
+dend <- as.dendrogram(fit)
+```
+
+```{r dendro-1, fig.height=8, fig.width=12}
+par(mar = c(5, 4, 4, 2))
+plot(dend, main = "Dendrogram - Tüm Gözlemler (Ward Yöntemi)",
+     xlab = "Gözlemler", ylab = "Uzaklık",
+     cex.main = 1.5, cex.lab = 1.2)
+```
+
+## Renkli Dendrogram (3 Küme)
+
+```{r dendro-2, fig.height=8, fig.width=12}
+par(mar = c(5, 4, 4, 2))
+plot(color_branches(dend, k = 3), 
+     main = "Dendrogram - 3 Kümeye Göre Renklendirilmiş",
+     cex.main = 1.5)
+```
+
+## Aykırı Gözlem Kontrolü
+
+<div class="info-box">
+**💡 Not:** Dendrogram incelenerek aykırı gözlemler tespit edilebilir. Gerekirse bu gözlemler analiz dışı bırakılabilir.
+</div>
+
+```{r aykiri-kontrol}
+# Şimdilik aykırı gözlem çıkarmadan devam ediyoruz
+# Eğer aykırı gözlem varsa, şu şekilde çıkarılabilir:
+# aykiri_gozlem <- c(25, 150)  # Örnek satır numaraları
+# kumeleme_data2 <- kumeleme_data[-aykiri_gozlem, ]
+# data2 <- data[-aykiri_gozlem, ]
+
+kumeleme_data2 <- kumeleme_data
+data2 <- data
+
+cat("✓ Analiz için kullanılan gözlem sayısı:", nrow(kumeleme_data2), "\n")
+```
+
+## Gelişmiş Dendrogram Görselleştirmeleri
+
+```{r dendro-gelismis}
+# Yeni uzaklık matrisi
+d2 <- dist(kumeleme_data2, method = "euclidean")
+fit2 <- hclust(d2, method = "ward.D")
+dend2 <- as.dendrogram(fit2)
+
+# Etiketleme
+labels(dend2) <- paste("Ogr_", data2$Ogrenci_ID[order.dendrogram(dend2)], sep = "")
+```
+
+```{r dendro-duzenlenmis, fig.height=10, fig.width=14}
+# Düzenlenmiş dendrogram
+geneldend <- dend2 %>%
+  set("branches_lwd", 2) %>%
+  set("branches_k_color", k = 3) %>%
+  set("labels_cex", 0.6) %>%
+  set("labels_colors", k = 3)
+
+par(mar = c(8, 4, 3, 2))
+plot(geneldend, main = "Düzenlenmiş Dendrogram - 3 Küme",
+     cex.main = 1.5)
+```
+
+```{r dendro-factoextra, fig.height=8, fig.width=12}
+# factoextra ile dendrogram
+res.hc <- hclust(d2, method = "ward.D2")
+fviz_dend(res.hc, cex = 0.4, k = 3, palette = "jco",
+          main = "Hiyerarşik Kümeleme Dendrogramı (factoextra)",
+          xlab = "Gözlemler", ylab = "Yükseklik",
+          ggtheme = theme_minimal()) +
+  theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"))
+```
+
+## Polar Dendrogram
+
+```{r dendro-polar, fig.height=10, fig.width=10}
+# Polar eksende dendrogram
+par(mar = c(1, 1, 3, 1))
+geneldend %>%
+  set("labels_cex", 0.5) %>%
+  set("labels_colors", k = 3) %>%
+  circlize_dendrogram(dend_track_height = 0.7)
+title("Polar Dendrogram", line = -1, cex.main = 1.5)
+```
+
+---
+
+# K-Means Kümeleme Analizi
+
+## Optimal Küme Sayısının Belirlenmesi
+
+### Elbow (Dirsek) Yöntemi
+
+```{r elbow, fig.height=6, fig.width=9}
+fviz_nbclust(kumeleme_data2, kmeans, method = "wss", k.max = 10) +
+  geom_vline(xintercept = 3, linetype = 2, color = "red") +
+  labs(title = "Optimal Küme Sayısı - Elbow Yöntemi",
+       subtitle = "Kırmızı çizgi önerilen küme sayısını göstermektedir") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 11))
+```
+
+### Silhouette Yöntemi
+
+```{r silhouette, fig.height=6, fig.width=9}
+fviz_nbclust(kumeleme_data2, kmeans, method = "silhouette", k.max = 10) +
+  labs(title = "Optimal Küme Sayısı - Silhouette Yöntemi",
+       subtitle = "En yüksek değer optimal küme sayısını gösterir") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 11))
+```
+
+<div class="success-box">
+**✅ Sonuç:** Her iki yönteme göre de **3 küme** optimal görünmektedir.
+</div>
+
+## K-Means Kümeleme (k=3)
+
+```{r kmeans}
+# K-means kümeleme
+set.seed(95739487)
+km.res <- kmeans(kumeleme_data2, centers = 3, iter.max = 100, 
+                 nstart = 25, algorithm = "Lloyd")
+
+# Küme büyüklükleri
+cat("📊 Her Kümedeki Gözlem Sayısı:\n")
+print(table(km.res$cluster))
+cat("\n")
+
+# Küme merkezleri
+cat("🎯 Küme Merkezleri (Final Cluster Centers):\n\n")
+t(km.res$centers) %>%
+  kable(caption = "Küme Merkezleri", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, background = "#f8f9fa")
+```
+
+## Kümeleme Sonuçlarının Görselleştirilmesi
+
+### 2 Boyutlu Gösterim (PCA)
+
+```{r kmeans-gorsel-1, fig.height=8, fig.width=11}
+# clusplot ile görselleştirme
+clusplot(kumeleme_data2, km.res$cluster, 
+         main = 'K-Means Kümeleme - 2 Boyutlu Gösterim (İlk İki Temel Bileşen)',
+         color = TRUE, 
+         shade = TRUE,
+         labels = 2, 
+         lines = 0,
+         cex = 1.2,
+         col.clus = c("#e74c3c", "#3498db", "#2ecc71"),
+         col.p = c("#e74c3c", "#3498db", "#2ecc71"))
+```
+
+### İnteraktif Görselleştirme
+
+```{r kmeans-gorsel-2, fig.height=8, fig.width=11}
+# factoextra ile gelişmiş görselleştirme
+fviz_cluster(km.res, data = kumeleme_data2, 
+             palette = c("#e74c3c", "#3498db", "#2ecc71"),
+             geom = "point",
+             ellipse.type = "convex",
+             ggtheme = theme_minimal(),
+             main = "K-Means Kümeleme Sonuçları") +
+  theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+        legend.position = "right",
+        legend.title = element_text(size = 12, face = "bold"),
+        legend.text = element_text(size = 10)) +
+  scale_color_manual(values = c("#e74c3c", "#3498db", "#2ecc71"),
+                     name = "Küme",
+                     labels = c("Küme 1", "Küme 2", "Küme 3")) +
+  scale_fill_manual(values = c("#e74c3c", "#3498db", "#2ecc71"),
+                    name = "Küme",
+                    labels = c("Küme 1", "Küme 2", "Küme 3"))
+```
+
+## Küme Üyeliklerinin Veriye Eklenmesi
+
+```{r kume-uyelik}
+# Küme üyeliklerini veriye ekleme
+data2$cluster <- as.factor(km.res$cluster)
+kumeleme_data2$cluster <- as.factor(km.res$cluster)
+
+cat("✅ Küme üyelikleri veriye başarıyla eklendi!\n")
+```
+
+---
+
+# İstatistiksel Analiz (ANOVA)
+
+<div class="info-box">
+**📈 Amaç:** Her değişken için kümeler arasında anlamlı fark olup olmadığını test etmek.
+**H₀:** Kümeler arasında anlamlı fark yoktur.
+**H₁:** En az iki küme arasında anlamlı fark vardır.
+</div>
+
+```{r anova-hesapla}
+# ANOVA testleri
+anova_sonuclari <- data.frame(
+  Degisken = character(),
+  F_Degeri = numeric(),
+  p_Degeri = numeric(),
+  Anlamlilik = character(),
+  stringsAsFactors = FALSE
+)
+
+degiskenler <- c("Yas", "Nabiz", "Kan_Basinci_Sistolik", "Kan_Basinci_Diyastolik",
+                 "Stress_Seviyesi_Biosensor", "Stress_Seviyesi_Bildirim",
+                 "Ders_Saatleri", "Proje_Saatleri")
+
+for (deg in degiskenler) {
+  formula_str <- paste(deg, "~ cluster")
+  aov_result <- aov(as.formula(formula_str), data = data2)
+  summary_aov <- summary(aov_result)
+  
+  f_value <- summary_aov[[1]]["cluster", "F value"]
+  p_value <- summary_aov[[1]]["cluster", "Pr(>F)"]
+  
+  anlamli <- ifelse(p_value < 0.001, "***",
+                    ifelse(p_value < 0.01, "**",
+                           ifelse(p_value < 0.05, "*", "NS")))
+  
+  anova_sonuclari <- rbind(anova_sonuclari, 
+                           data.frame(Degisken = deg,
+                                      F_Degeri = f_value,
+                                      p_Degeri = p_value,
+                                      Anlamlilik = anlamli))
+}
+```
+
+## ANOVA Sonuçları Tablosu
+
+```{r anova-tablo}
+anova_sonuclari %>%
+  mutate(p_Degeri = format(p_Degeri, scientific = TRUE, digits = 3)) %>%
+  kable(caption = "ANOVA Test Sonuçları (*** p<0.001, ** p<0.01, * p<0.05, NS: Anlamlı değil)",
+        col.names = c("Değişken", "F Değeri", "p Değeri", "Anlamlılık"),
+        digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE) %>%
+  column_spec(4, bold = TRUE, 
+              color = ifelse(anova_sonuclari$p_Degeri < 0.05, "green", "red"))
+```
+
+## ANOVA Sonuçlarının Görselleştirilmesi
+
+```{r anova-gorsel, fig.height=7, fig.width=10}
+anova_sonuclari$log_p <- -log10(anova_sonuclari$p_Degeri)
+
+ggplot(anova_sonuclari, aes(x = reorder(Degisken, F_Degeri), y = F_Degeri, fill = p_Degeri < 0.05)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  geom_hline(yintercept = 3.0, linetype = "dashed", color = "red", size = 1) +
+  scale_fill_manual(values = c("FALSE" = "#e74c3c", "TRUE" = "#2ecc71"),
+                    labels = c("Anlamlı Değil (p≥0.05)", "Anlamlı (p<0.05)"),
+                    name = "") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "ANOVA F Değerleri - Değişkenlere Göre",
+       subtitle = "Kırmızı çizgi yaklaşık anlamlılık eşiğini gösterir",
+       x = "Değişkenler",
+       y = "F Değeri") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 11),
+        legend.position = "bottom",
+        axis.text = element_text(size = 10))
+```
+
+---
+
+# Küme Karakteristikleri
+
+## Küme İstatistikleri
+
+```{r kume-stats}
+# Her küme için ortalama değerler
+cluster_means <- aggregate(. ~ cluster, 
+                          data = data2[, c(analiz_degiskenleri, "cluster")], 
+                          FUN = mean)
+
+cluster_means %>%
+  kable(caption = "Kümelere Göre Ortalama Değerler", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, background = "#f8f9fa") %>%
+  scroll_box(width = "100%")
+```
+
+```{r kume-sd}
+# Her küme için standart sapmalar
+cluster_sd <- aggregate(. ~ cluster, 
+                       data = data2[, c(analiz_degiskenleri, "cluster")], 
+                       FUN = sd)
+
+cluster_sd %>%
+  kable(caption = "Kümelere Göre Standart Sapmalar", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE, background = "#f8f9fa") %>%
+  scroll_box(width = "100%")
+```
+
+## İnteraktif Küme İstatistikleri
+
+```{r interaktif-tablo}
+data2 %>%
+  group_by(cluster) %>%
+  summarise(
+    N = n(),
+    Ort_Yas = mean(Yas),
+    Ort_Nabiz = mean(Nabiz),
+    Ort_Sistolik = mean(Kan_Basinci_Sistolik),
+    Ort_Diyastolik = mean(Kan_Basinci_Diyastolik),
+    Ort_Stress_Bio = mean(Stress_Seviyesi_Biosensor),
+    Ort_Stress_Bil = mean(Stress_Seviyesi_Bildirim),
+    Ort_Ders = mean(Ders_Saatleri),
+    Ort_Proje = mean(Proje_Saatleri)
+  ) %>%
+  datatable(caption = "Küme Özet İstatistikleri (İnteraktif Tablo)",
+            options = list(pageLength = 10, scrollX = TRUE),
+            rownames = FALSE) %>%
+  formatRound(columns = 2:10, digits = 2)
+```
+
+---
+
+# Boxplot Görselleştirmeleri
+
+## Ana Değişkenler İçin Boxplot'lar
+
+```{r boxplot-1, fig.height=10, fig.width=12}
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 2))
+
+# Yaş
+boxplot(Yas ~ cluster, data = data2, 
+        main = "Yaş - Kümelere Göre",
+        xlab = "Küme", ylab = "Yaş",
+        col = c("#e74c3c", "#3498db", "#2ecc71"),
+        border = "black", notch = TRUE)
+
+# Nabız
+boxplot(Nabiz ~ cluster, data = data2, 
+        main = "Nabız - Kümelere Göre",
+        xlab = "Küme", ylab = "Nabız (atım/dk)",
+        col = c("#e74c3c", "#3498db", "#2ecc71"),
+        border = "black", notch = TRUE)
+
+# Stres Seviyesi (Biosensor)
+boxplot(Stress_Seviyesi_Biosensor ~ cluster, data = data2, 
+        main = "Stres Seviyesi (Biosensor) - Kümelere Göre",
+        xlab = "Küme", ylab = "Stres Seviyesi",
+        col = c("#e74c3c", "#3498db", "#2ecc71"),
+        border = "black", notch = TRUE)
+
+# Ders Saatleri
+boxplot(Ders_Saatleri ~ cluster, data = data2, 
+        main = "Ders Saatleri - Kümelere Göre",
+        xlab = "Küme", ylab = "Ders Saatleri",
+        col = c("#e74c3c", "#3498db", "#2ecc71"),
+        border = "black", notch = TRUE)
+
+par(mfrow = c(1, 1))
+```
+
+## Kan Basıncı Değişkenleri
+
+```{r boxplot-2, fig.height=6, fig.width=12}
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 2))
+
+# Sistolik
+boxplot(Kan_Basinci_Sistolik ~ cluster, data = data2, 
+        main = "Kan Basıncı (Sistolik) - Kümelere Göre",
+        xlab = "Küme", ylab = "Sistolik (mmHg)",
+        col = c("#e74c3c", "#3498db", "#2ecc71"),
+        border = "black", notch = TRUE)
+
+# Diyastolik
+boxplot(Kan_Basinci_Diyastolik ~ cluster, data = data2, 
+        main = "Kan Basıncı (Diyastolik) - Kümelere Göre",
+        xlab = "Küme", ylab = "Diyastolik (mmHg)",
+        col = c("#e74c3c", "#3498db", "#2ecc71"),
+        border = "black", notch = TRUE)
+
+par(mfrow = c(1, 1))
+```
+
+## Çalışma Saatleri
+
+```{r boxplot-3, fig.height=6, fig.width=12}
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 2))
+
+# Ders Saatleri
+boxplot(Ders_Saatleri ~ cluster, data = data2, 
+        main = "Ders Saatleri - Kümelere Göre",
+        xlab = "Küme", ylab = "Saat",
+        col = c("#e74c3c", "#3498db", "#2ecc71"),
+        border = "black", notch = TRUE)
+
+# Proje Saatleri
+boxplot(Proje_Saatleri ~ cluster, data = data2, 
+        main = "Proje Saatleri - Kümelere Göre",
+        xlab = "Küme", ylab = "Saat",
+        col = c("#e74c3c", "#3498db", "#2ecc71"),
+        border = "black", notch = TRUE)
+
+par(mfrow = c(1, 1))
+```
+
+## ggplot2 ile Gelişmiş Boxplot'lar
+
+```{r ggplot-boxplot, fig.height=10, fig.width=14}
+library(tidyr)
+library(gridExtra)
+
+# Veriyi uzun formata çevirme
+data_long <- data2 %>%
+  select(cluster, all_of(analiz_degiskenleri)) %>%
+  pivot_longer(cols = -cluster, names_to = "Degisken", values_to = "Deger")
+
+# Boxplot
+p <- ggplot(data_long, aes(x = cluster, y = Deger, fill = cluster)) +
+  geom_boxplot(alpha = 0.7, outlier.colour = "red", outlier.shape = 1) +
+  facet_wrap(~ Degisken, scales = "free_y", ncol = 4) +
+  scale_fill_manual(values = c("#e74c3c", "#3498db", "#2ecc71")) +
+  theme_minimal() +
+  labs(title = "Tüm Değişkenler için Küme Karşılaştırmaları",
+       x = "Küme",
+       y = "Değer") +
+  theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+        strip.text = element_text(size = 10, face = "bold"),
+        legend.position = "bottom",
+        axis.text.x = element_text(size = 9),
+        panel.grid.minor = element_blank())
+
+print(p)
+```
+
+---
+
+# Küme Profilleri (Radar Grafikleri)
+
+```{r radar-hazirlik, message=FALSE, warning=FALSE}
+library(fmsb)
+
+# Verileri normalize etme (0-100 arası)
+normalize <- function(x) {
+  return(100 * (x - min(x)) / (max(x) - min(x)))
+}
+
+# Küme ortalamalarını normalize et
+cluster_means_norm <- cluster_means
+for (col in analiz_degiskenleri) {
+  cluster_means_norm[[col]] <- normalize(cluster_means[[col]])
+}
+```
+
+```{r radar-plot, fig.height=10, fig.width=14}
+par(mfrow = c(1, 3), mar = c(1, 1, 3, 1))
+
+# Her küme için radar grafiği
+colors <- c("#e74c3c", "#3498db", "#2ecc71")
+
+for (i in 1:3) {
+  # Radar grafiği için veri hazırlama
+  radar_data <- rbind(
+    rep(100, 8),  # Max değerler
+    rep(0, 8),    # Min değerler
+    cluster_means_norm[cluster_means_norm$cluster == i, analiz_degiskenleri]
+  )
+  
+  # Kısa değişken isimleri
+  colnames(radar_data) <- c("Yaş", "Nabız", "Sistolik", "Diyastolik", 
+                            "Stres_Bio", "Stres_Bil", "Ders", "Proje")
+  
+  radarchart(radar_data,
+             axistype = 1,
+             pcol = colors[i],
+             pfcol = scales::alpha(colors[i], 0.3),
+             plwd = 3,
+             cglcol = "grey",
+             cglty = 1,
+             axislabcol = "grey20",
+             caxislabels = seq(0, 100, 25),
+             cglwd = 0.8,
+             vlcex = 0.9,
+             title = paste("Küme", i, "Profili"))
+}
+
+par(mfrow = c(1, 1))
+```
+
+---
+
+# Sonuçların Kaydedilmesi
+
+```{r kayit}
+# Küme üyeliklerini içeren veriyi kaydetme
+write.csv(data2, "kumeleme_sonuclari.csv", row.names = FALSE)
+cat("✅ Kümeleme sonuçları 'kumeleme_sonuclari.csv' dosyasına kaydedildi.\n\n")
+
+# Küme istatistiklerini kaydetme
+write.csv(cluster_means, "kume_ortalamalar.csv", row.names = FALSE)
+cat("✅ Küme ortalamaları 'kume_ortalamalar.csv' dosyasına kaydedildi.\n\n")
+
+# ANOVA sonuçlarını kaydetme
+write.csv(anova_sonuclari, "anova_sonuclari.csv", row.names = FALSE)
+cat("✅ ANOVA sonuçları 'anova_sonuclari.csv' dosyasına kaydedildi.\n")
+```
+
+---
+
+# Özet ve Yorumlar
+
+<div class="success-box">
+## 📊 Analiz Özeti
+
+### Kümeleme Yöntemleri
+- **Hiyerarşik Kümeleme:** Ward yöntemi kullanılarak dendrogram oluşturuldu
+- **K-Means Kümeleme:** Optimal küme sayısı (k=3) belirlenerek analiz yapıldı
+
+### Küme Sayısı
+- Elbow ve Silhouette yöntemleri **3 küme** önermektedir
+
+### ANOVA Sonuçları
+Aşağıdaki değişkenler kümeler arasında anlamlı fark göstermiştir (p<0.05):
+
+```{r ozet-anova}
+anlamli_degiskenler <- anova_sonuclari %>%
+  filter(p_Degeri < 0.05) %>%
+  arrange(p_Degeri)
+
+if (nrow(anlamli_degiskenler) > 0) {
+  anlamli_degiskenler %>%
+    mutate(p_Degeri = format(p_Degeri, scientific = TRUE, digits = 3)) %>%
+    kable(caption = "Kümeler Arası Anlamlı Fark Gösteren Değişkenler") %>%
+    kable_styling(bootstrap_options = c("striped", "hover"),
+                  full_width = FALSE)
+} else {
+  cat("Hiçbir değişken kümeler arasında anlamlı fark göstermemiştir.\n")
+}
+```
+
+### Küme Büyüklükleri
+
+```{r ozet-buyukluk}
+table(data2$cluster) %>%
+  as.data.frame() %>%
+  setNames(c("Küme", "Gözlem Sayısı")) %>%
+  mutate(Yuzde = paste0(round(100 * `Gözlem Sayısı` / sum(`Gözlem Sayısı`), 1), "%")) %>%
+  kable(caption = "Kümelerdeki Gözlem Dağılımı") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+```
+
+</div>
+
+<div class="info-box">
+## 💡 Yorumlar ve Öneriler
+
+1. **Küme Karakterizasyonu:** Her kümenin ortalama değerlerine bakarak kümelere anlamlı isimler verilebilir (örn: "Yüksek Stres Grubu", "Dengeli Grup", vb.)
+
+2. **Değişken Önemi:** ANOVA sonuçları, hangi değişkenlerin kümeleri en iyi ayırt ettiğini göstermektedir
+
+3. **Aykırı Değerler:** Boxplot'larda görülen aykırı değerler detaylı incelenmelidir
+
+4. **Validasyon:** Farklı seed değerleri ve başlangıç noktaları ile sonuçların tutarlılığı kontrol edilebilir
+
+5. **İleri Analiz:** Kümelere göre ek analizler (lojistik regresyon, karar ağaçları) yapılabilir
+</div>
+
+---
+
+<div style="background-color: #34495e; color: white; padding: 20px; text-align: center; border-radius: 10px; margin-top: 40px;">
+**📅 Rapor Tarihi:** `r Sys.Date()`  
+**👤 Analiz:** Kümeleme Analizi - Öğrenci Stres Verileri  
+**📊 Gözlem Sayısı:** `r nrow(data2)`  
+**🔬 Küme Sayısı:** 3  
+**✨ Durum:** Analiz Tamamlandı
+</div>

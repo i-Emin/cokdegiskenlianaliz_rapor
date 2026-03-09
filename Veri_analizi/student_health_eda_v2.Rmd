@@ -1,0 +1,847 @@
+---
+title: "Öğrenci Sağlık Verileri - Keşifsel Veri Analizi"
+author: "Veri Analizi Raporu"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 6,
+  fig.align = 'center'
+)
+```
+
+# 📊 VERİ SETİNE GENEL BAKIŞ
+
+## Kütüphaneleri Yükleme
+
+```{r libraries}
+# Veri manipülasyonu
+library(readxl)
+library(dplyr)
+library(tidyr)
+
+# Görselleştirme
+library(ggplot2)
+library(ggcorrplot)
+library(gridExtra)
+library(scales)
+library(RColorBrewer)
+library(viridis)
+
+# İstatistik ve tablo
+library(knitr)
+library(kableExtra)
+library(psych)
+
+# Tema ayarları
+theme_set(theme_minimal(base_size = 12))
+```
+
+## Veriyi Yükleme
+
+```{r load_data}
+# Veri yolu - KENDİ DOSYA YOLUNUZU YAZIN
+data <- read_excel("C:/Users/User/Desktop/cda_data_verianalizi/Veri analizi/student_health_data.xlsx")
+
+# Veri boyutu
+cat("📏 Veri Seti Boyutu:", nrow(data), "satır x", ncol(data), "sütun\n")
+```
+
+## Veri Yapısı ve İlk Bakış
+
+```{r data_structure}
+# Veri yapısı
+str(data)
+
+# İlk 10 satır
+head(data, 10) %>%
+  kable(caption = "Veri Setinin İlk 10 Satırı") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE,
+                font_size = 12) %>%
+  scroll_box(width = "100%", height = "400px")
+```
+
+## Değişken Tipleri ve Özet
+
+```{r variable_summary}
+# Kategorik ve sayısal değişkenleri ayır
+kategorik_vars <- c("Cinsiyet", "Fiziksel_Aktivite", "Uyku_Kalitesi", 
+                    "Ruh_Hali", "Saglik_Riski_Seviyesi")
+sayisal_vars <- c("Yas", "Nabiz", "Kan_Basinci_Sistolik", "Kan_Basinci_Diyastolik",
+                  "Stress_Seviyesi_Biosensor", "Stress_Seviyesi_Bildirim",
+                  "Ders_Saatleri", "Proje_Saatleri")
+
+# Özet tablo
+ozet_tablo <- data.frame(
+  Kategori = c("Toplam Değişken", "Kategorik Değişken", "Sayısal Değişken", 
+               "Toplam Gözlem", "Eksik Değer"),
+  Sayi = c(
+    ncol(data),
+    length(kategorik_vars),
+    length(sayisal_vars),
+    nrow(data),
+    sum(is.na(data))
+  )
+)
+
+ozet_tablo %>%
+  kable(caption = "📋 Veri Seti Özet Bilgileri",
+        col.names = c("Özellik", "Değer"),
+        align = c("l", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE,
+                position = "center") %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#3498db")
+```
+
+---
+
+# 🔍 EKSİK DEĞER ANALİZİ
+
+```{r missing_analysis}
+# Eksik değer sayıları
+eksik_deger <- data.frame(
+  Degisken = names(data),
+  Eksik_Sayi = colSums(is.na(data)),
+  Eksik_Yuzde = round(colSums(is.na(data)) / nrow(data) * 100, 2)
+)
+
+eksik_deger %>%
+  arrange(desc(Eksik_Sayi)) %>%
+  kable(caption = "🔎 Eksik Değer Analizi",
+        col.names = c("Değişken", "Eksik Sayı", "Eksik %")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  row_spec(which(eksik_deger$Eksik_Sayi > 0), 
+           bold = TRUE, color = "white", background = "#e74c3c")
+
+# Eksik değer görselleştirme
+if(sum(is.na(data)) > 0) {
+  # Eksik değer var ise görselleştir
+  eksik_viz <- eksik_deger %>%
+    filter(Eksik_Sayi > 0) %>%
+    ggplot(aes(x = reorder(Degisken, Eksik_Sayi), y = Eksik_Sayi)) +
+    geom_bar(stat = "identity", fill = "#e74c3c", alpha = 0.8) +
+    geom_text(aes(label = paste0(Eksik_Yuzde, "%")), 
+              hjust = -0.2, size = 4) +
+    coord_flip() +
+    labs(title = "Eksik Değer Dağılımı",
+         x = "Değişken",
+         y = "Eksik Değer Sayısı") +
+    theme_minimal(base_size = 12)
+  
+  print(eksik_viz)
+} else {
+  cat("✅ Veri setinde eksik değer bulunmamaktadır!\n")
+}
+```
+
+---
+
+# 📊 KATEGORİK DEĞİŞKENLER ANALİZİ
+
+## Frekans Tabloları
+
+```{r categorical_frequencies}
+# Her kategorik değişken için frekans tablosu
+for(var in kategorik_vars) {
+  cat("\n### ", toupper(var), "\n\n")
+  
+  # Frekans tablosu
+  freq_table <- data %>%
+    count(!!sym(var)) %>%
+    mutate(
+      Yuzde = round(n / sum(n) * 100, 2),
+      Kumulatif_Yuzde = round(cumsum(Yuzde), 2)
+    ) %>%
+    arrange(desc(n))
+  
+  colnames(freq_table)[1] <- var
+  
+  freq_table %>%
+    kable(caption = paste("Frekans Tablosu:", var),
+          col.names = c(var, "Frekans", "Yüzde (%)", "Kümülatif %")) %>%
+    kable_styling(bootstrap_options = c("striped", "hover"),
+                  full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, color = "white", background = "#2ecc71") %>%
+    print()
+  
+  cat("\n\n")
+}
+```
+
+## Kategorik Değişkenler Görselleştirme
+
+```{r categorical_viz, fig.height=8}
+# Tüm kategorik değişkenler için çubuk grafikleri
+plot_list <- list()
+
+for(i in seq_along(kategorik_vars)) {
+  var <- kategorik_vars[i]
+  
+  # Renk paleti
+  n_colors <- length(unique(data[[var]]))
+  colors <- viridis(n_colors, option = "D")
+  
+  p <- data %>%
+    count(!!sym(var)) %>%
+    ggplot(aes(x = reorder(!!sym(var), -n), y = n, fill = !!sym(var))) +
+    geom_bar(stat = "identity", alpha = 0.85, color = "black", size = 0.3) +
+    geom_text(aes(label = paste0(n, "\n(", round(n/sum(n)*100, 1), "%)")),
+              vjust = -0.3, size = 3.5, fontface = "bold") +
+    scale_fill_manual(values = colors) +
+    labs(title = paste("📊", var, "Dağılımı"),
+         x = var,
+         y = "Frekans") +
+    theme_minimal(base_size = 11) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "none",
+      panel.grid.major.x = element_blank()
+    )
+  
+  plot_list[[i]] <- p
+}
+
+# Grafikleri birleştir
+do.call(grid.arrange, c(plot_list, ncol = 2))
+```
+
+## Pasta Grafikleri
+
+```{r categorical_pie, fig.height=10}
+# Her kategorik değişken için pasta grafiği
+par(mfrow = c(3, 2), mar = c(2, 2, 3, 2))
+
+for(var in kategorik_vars) {
+  freq <- table(data[[var]])
+  percentages <- round(freq / sum(freq) * 100, 1)
+  labels <- paste0(names(freq), "\n", freq, " (", percentages, "%)")
+  
+  # Renk paleti
+  colors <- brewer.pal(length(freq), "Set3")
+  
+  pie(freq, 
+      labels = labels,
+      col = colors,
+      main = paste("🥧", var),
+      cex.main = 1.3,
+      cex = 0.9,
+      border = "white",
+      radius = 0.9)
+}
+par(mfrow = c(1, 1))
+```
+
+---
+
+# 📈 SAYISAL DEĞİŞKENLER ANALİZİ
+
+## Özet İstatistikler
+
+```{r numerical_summary}
+# Detaylı özet istatistikler
+ozet_stats <- data %>%
+  select(all_of(sayisal_vars)) %>%
+  describe() %>%
+  select(n, mean, sd, median, min, max, range, skew, kurtosis) %>%
+  round(2)
+
+ozet_stats %>%
+  kable(caption = "📊 Sayısal Değişkenler - Özet İstatistikler",
+        col.names = c("N", "Ortalama", "Std. Sapma", "Medyan", 
+                      "Min", "Max", "Ranj", "Çarpıklık", "Basıklık")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE,
+                font_size = 11) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#3498db") %>%
+  scroll_box(width = "100%")
+```
+
+## Histogram Grafikleri
+
+```{r numerical_histograms, fig.height=12}
+# Tüm sayısal değişkenler için histogram
+plot_list <- list()
+
+for(i in seq_along(sayisal_vars)) {
+  var <- sayisal_vars[i]
+  
+  # Ortalama ve medyan
+  mean_val <- mean(data[[var]], na.rm = TRUE)
+  median_val <- median(data[[var]], na.rm = TRUE)
+  
+  p <- ggplot(data, aes(x = !!sym(var))) +
+    geom_histogram(aes(y = after_stat(density)), 
+                   bins = 30, 
+                   fill = "#3498db", 
+                   color = "black", 
+                   alpha = 0.7) +
+    geom_density(color = "#e74c3c", size = 1.2, alpha = 0.5) +
+    geom_vline(aes(xintercept = mean_val), 
+               color = "#2ecc71", linetype = "dashed", size = 1,
+               alpha = 0.8) +
+    geom_vline(aes(xintercept = median_val), 
+               color = "#f39c12", linetype = "dashed", size = 1,
+               alpha = 0.8) +
+    labs(title = paste("📊", var, "Dağılımı"),
+         subtitle = paste0("Ortalama: ", round(mean_val, 2), 
+                          " | Medyan: ", round(median_val, 2)),
+         x = var,
+         y = "Yoğunluk") +
+    theme_minimal(base_size = 11) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 13),
+      plot.subtitle = element_text(hjust = 0.5, size = 10, color = "gray40")
+    )
+  
+  plot_list[[i]] <- p
+}
+
+do.call(grid.arrange, c(plot_list, ncol = 2))
+```
+
+## Kutu Grafikleri (Boxplot)
+
+```{r numerical_boxplots, fig.height=10}
+# Tüm sayısal değişkenler için boxplot
+data_long <- data %>%
+  select(all_of(sayisal_vars)) %>%
+  pivot_longer(cols = everything(), 
+               names_to = "Degisken", 
+               values_to = "Deger")
+
+ggplot(data_long, aes(x = Degisken, y = Deger, fill = Degisken)) +
+  geom_boxplot(alpha = 0.7, outlier.colour = "#e74c3c", outlier.size = 2) +
+  geom_jitter(alpha = 0.1, width = 0.2, size = 0.5) +
+  scale_fill_viridis_d(option = "C") +
+  facet_wrap(~ Degisken, scales = "free", ncol = 3) +
+  labs(title = "📦 Sayısal Değişkenler - Kutu Grafikleri",
+       subtitle = "Aykırı değerler kırmızı ile işaretlenmiştir",
+       x = "",
+       y = "Değer") +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    plot.subtitle = element_text(hjust = 0.5, size = 11, color = "gray40"),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 11)
+  )
+```
+
+```{r}
+### Q-Q Plot (Normallik Grafiği)
+
+```{r qq_plot, fig.height=10}
+# Her değişken için Q-Q plot
+qq_list <- lapply(sayisal_vars, function(var) {
+  ggplot(data, aes_string(sample = var)) +
+    stat_qq(color = "blue", alpha = 0.6) +
+    stat_qq_line(color = "red", linetype = "dashed", size = 1) +
+    labs(title = paste("Q-Q Plot:", var),
+         x = "Teorik Kuantiller", y = "Gözlenen Kuantiller") +
+    theme_minimal(base_size = 11) +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+})
+
+do.call(grid.arrange, c(qq_list, ncol = 2))
+```
+```
+
+## Violin Plot
+
+```{r numerical_violin, fig.height=10}
+# Violin plot ile dağılım yoğunluğu
+ggplot(data_long, aes(x = Degisken, y = Deger, fill = Degisken)) +
+  geom_violin(alpha = 0.7, trim = FALSE) +
+  geom_boxplot(width = 0.2, alpha = 0.5, outlier.alpha = 0) +
+  scale_fill_brewer(palette = "Set3") +
+  facet_wrap(~ Degisken, scales = "free", ncol = 3) +
+  labs(title = "🎻 Sayısal Değişkenler - Violin Plot",
+       subtitle = "Dağılım yoğunluğu ve kutu grafiği kombinasyonu",
+       x = "",
+       y = "Değer") +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    plot.subtitle = element_text(hjust = 0.5, size = 11, color = "gray40"),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 11)
+  )
+```
+
+---
+
+# 🔗 KORELASYON ANALİZİ
+
+## Korelasyon Matrisi
+
+```{r correlation_matrix}
+# Korelasyon matrisi hesapla
+cor_matrix <- data %>%
+  select(all_of(sayisal_vars)) %>%
+  cor(use = "complete.obs") %>%
+  round(2)
+
+# Korelasyon matrisi tablosu
+cor_matrix %>%
+  kable(caption = "📊 Korelasyon Matrisi") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE,
+                font_size = 10) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#34495e")
+```
+
+## Korelasyon Isı Haritası
+
+```{r correlation_heatmap, fig.height=8, fig.width=10}
+# Korelasyon ısı haritası
+ggcorrplot(cor_matrix, 
+           method = "circle",
+           type = "lower",
+           lab = TRUE,
+           lab_size = 3.5,
+           colors = c("#e74c3c", "white", "#3498db"),
+           title = "🔥 Korelasyon Isı Haritası",
+           ggtheme = theme_minimal(base_size = 12),
+           legend.title = "Korelasyon") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10)
+  )
+```
+
+## Güçlü Korelasyonlar
+
+```{r strong_correlations}
+# Güçlü korelasyonları bul (|r| > 0.5)
+cor_long <- as.data.frame(as.table(cor_matrix)) %>%
+  filter(Var1 != Var2) %>%
+  filter(abs(Freq) > 0.5) %>%
+  arrange(desc(abs(Freq))) %>%
+  distinct(Freq, .keep_all = TRUE)
+
+colnames(cor_long) <- c("Değişken 1", "Değişken 2", "Korelasyon")
+
+if(nrow(cor_long) > 0) {
+  cor_long %>%
+    kable(caption = "⚡ Güçlü Korelasyonlar (|r| > 0.5)",
+          digits = 3) %>%
+    kable_styling(bootstrap_options = c("striped", "hover"),
+                  full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, color = "white", background = "#e67e22") %>%
+    row_spec(which(abs(cor_long$Korelasyon) > 0.7), 
+             bold = TRUE, color = "white", background = "#c0392b")
+} else {
+  cat("ℹ️ 0.5'ten güçlü korelasyon bulunmamaktadır.\n")
+}
+```
+
+---
+
+# 📊 İKİ DEĞİŞKENLİ ANALİZLER
+
+## Cinsiyete Göre Sayısal Değişkenler
+
+```{r gender_comparison, fig.height=10}
+# Cinsiyete göre karşılaştırma
+plot_list <- list()
+
+for(i in seq_along(sayisal_vars)) {
+  var <- sayisal_vars[i]
+  
+  p <- ggplot(data, aes(x = Cinsiyet, y = !!sym(var), fill = Cinsiyet)) +
+    geom_boxplot(alpha = 0.7, outlier.alpha = 0.5) +
+    geom_jitter(alpha = 0.2, width = 0.2, size = 1) +
+    scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+    stat_summary(fun = mean, geom = "point", 
+                 shape = 23, size = 3, fill = "yellow", color = "black") +
+    labs(title = paste(var, "- Cinsiyete Göre"),
+         x = "Cinsiyet",
+         y = var) +
+    theme_minimal(base_size = 10) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 11),
+      legend.position = "none"
+    )
+  
+  plot_list[[i]] <- p
+}
+
+do.call(grid.arrange, c(plot_list, ncol = 3))
+```
+
+## Sağlık Risk Seviyesine Göre Karşılaştırma
+
+```{r health_risk_comparison, fig.height=10}
+# Sağlık risk seviyesine göre
+plot_list <- list()
+
+for(i in 1:min(6, length(sayisal_vars))) {
+  var <- sayisal_vars[i]
+  
+  p <- ggplot(data, aes(x = Saglik_Riski_Seviyesi, y = !!sym(var), 
+                        fill = Saglik_Riski_Seviyesi)) +
+    geom_violin(alpha = 0.7, trim = FALSE) +
+    geom_boxplot(width = 0.3, alpha = 0.5, outlier.alpha = 0) +
+    scale_fill_viridis_d(option = "plasma") +
+    labs(title = paste(var),
+         x = "Sağlık Risk Seviyesi",
+         y = var) +
+    theme_minimal(base_size = 10) +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 11),
+      legend.position = "none",
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+  
+  plot_list[[i]] <- p
+}
+
+do.call(grid.arrange, c(plot_list, ncol = 3))
+```
+
+## Saçılım Grafikleri (Scatterplot)
+
+```{r scatterplots, fig.height=8}
+# Önemli değişken çiftleri için saçılım grafikleri
+p1 <- ggplot(data, aes(x = Ders_Saatleri, y = Proje_Saatleri, 
+                       color = Saglik_Riski_Seviyesi)) +
+  geom_point(alpha = 0.6, size = 2.5) +
+  geom_smooth(method = "lm", se = TRUE, alpha = 0.2) +
+  scale_color_viridis_d(option = "D") +
+  labs(title = "Ders Saatleri vs Proje Saatleri",
+       x = "Ders Saatleri",
+       y = "Proje Saatleri",
+       color = "Sağlık Riski") +
+  theme_minimal(base_size = 11)
+
+p2 <- ggplot(data, aes(x = Nabiz, y = Kan_Basinci_Sistolik, 
+                       color = Ruh_Hali)) +
+  geom_point(alpha = 0.6, size = 2.5) +
+  geom_smooth(method = "lm", se = TRUE, alpha = 0.2) +
+  scale_color_brewer(palette = "Set2") +
+  labs(title = "Nabız vs Sistolik Kan Basıncı",
+       x = "Nabız",
+       y = "Sistolik Kan Basıncı",
+       color = "Ruh Hali") +
+  theme_minimal(base_size = 11)
+
+p3 <- ggplot(data, aes(x = Stress_Seviyesi_Biosensor, 
+                       y = Stress_Seviyesi_Bildirim,
+                       color = Uyku_Kalitesi)) +
+  geom_point(alpha = 0.6, size = 2.5) +
+  geom_smooth(method = "lm", se = TRUE, alpha = 0.2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", 
+              color = "red", alpha = 0.5) +
+  scale_color_manual(values = c("#e74c3c", "#f39c12", "#2ecc71")) +
+  labs(title = "Biosensör vs Bildirim Stres Seviyesi",
+       x = "Stress (Biosensör)",
+       y = "Stress (Bildirim)",
+       color = "Uyku Kalitesi") +
+  theme_minimal(base_size = 11)
+
+p4 <- ggplot(data, aes(x = Yas, y = Nabiz, color = Fiziksel_Aktivite)) +
+  geom_point(alpha = 0.6, size = 2.5) +
+  geom_smooth(method = "lm", se = TRUE, alpha = 0.2) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(title = "Yaş vs Nabız",
+       x = "Yaş",
+       y = "Nabız",
+       color = "Fiziksel Aktivite") +
+  theme_minimal(base_size = 11)
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+
+---
+
+# 🎯 AYKIRI DEĞER ANALİZİ
+
+## Z-Skoru ile Aykırı Değer Tespiti
+
+```{r outlier_zscore}
+# Z-skoru hesapla ve aykırı değerleri tespit et
+outlier_counts <- data.frame(
+  Degisken = sayisal_vars,
+  Aykiri_Sayi = 0,
+  Aykiri_Yuzde = 0
+)
+
+for(i in seq_along(sayisal_vars)) {
+  var <- sayisal_vars[i]
+  z_scores <- scale(data[[var]])
+  outliers <- abs(z_scores) > 3
+  outlier_counts$Aykiri_Sayi[i] <- sum(outliers, na.rm = TRUE)
+  outlier_counts$Aykiri_Yuzde[i] <- round(sum(outliers, na.rm = TRUE) / 
+                                           nrow(data) * 100, 2)
+}
+
+outlier_counts %>%
+  arrange(desc(Aykiri_Sayi)) %>%
+  kable(caption = "🎯 Aykırı Değer Analizi (Z-Skoru > 3)",
+        col.names = c("Değişken", "Aykırı Sayı", "Aykırı %")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#c0392b") %>%
+  row_spec(which(outlier_counts$Aykiri_Sayi > 0), 
+           bold = TRUE, color = "#c0392b")
+```
+
+## IQR Yöntemi ile Aykırı Değer
+
+```{r outlier_iqr, fig.height=8}
+# IQR yöntemi ile aykırı değer tespiti
+iqr_outliers <- data.frame(
+  Degisken = sayisal_vars,
+  Alt_Sinir = 0,
+  Ust_Sinir = 0,
+  Aykiri_Alt = 0,
+  Aykiri_Ust = 0,
+  Toplam_Aykiri = 0
+)
+
+for(i in seq_along(sayisal_vars)) {
+  var <- sayisal_vars[i]
+  Q1 <- quantile(data[[var]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(data[[var]], 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  
+  alt_sinir <- Q1 - 1.5 * IQR
+  ust_sinir <- Q3 + 1.5 * IQR
+  
+  iqr_outliers$Alt_Sinir[i] <- round(alt_sinir, 2)
+  iqr_outliers$Ust_Sinir[i] <- round(ust_sinir, 2)
+  iqr_outliers$Aykiri_Alt[i] <- sum(data[[var]] < alt_sinir, na.rm = TRUE)
+  iqr_outliers$Aykiri_Ust[i] <- sum(data[[var]] > ust_sinir, na.rm = TRUE)
+  iqr_outliers$Toplam_Aykiri[i] <- iqr_outliers$Aykiri_Alt[i] + 
+                                    iqr_outliers$Aykiri_Ust[i]
+}
+
+iqr_outliers %>%
+  arrange(desc(Toplam_Aykiri)) %>%
+  kable(caption = "📊 IQR Yöntemi ile Aykırı Değer Analizi") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE,
+                font_size = 11) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#16a085") %>%
+  scroll_box(width = "100%")
+```
+
+---
+
+# 📈 GRUP BAZLI ÖZET İSTATİSTİKLER
+
+## Cinsiyete Göre Özet
+
+```{r summary_by_gender}
+# Cinsiyete göre özet istatistikler
+data %>%
+  group_by(Cinsiyet) %>%
+  summarise(
+    N = n(),
+    Ort_Yas = round(mean(Yas, na.rm = TRUE), 1),
+    Ort_Nabiz = round(mean(Nabiz, na.rm = TRUE), 1),
+    Ort_Sistolik = round(mean(Kan_Basinci_Sistolik, na.rm = TRUE), 1),
+    Ort_Diyastolik = round(mean(Kan_Basinci_Diyastolik, na.rm = TRUE), 1),
+    Ort_Ders = round(mean(Ders_Saatleri, na.rm = TRUE), 1),
+    Ort_Proje = round(mean(Proje_Saatleri, na.rm = TRUE), 1)
+  ) %>%
+  kable(caption = "👥 Cinsiyete Göre Özet İstatistikler") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#3498db")
+```
+
+## Sağlık Risk Seviyesine Göre Özet
+
+```{r summary_by_health_risk}
+# Sağlık risk seviyesine göre özet
+data %>%
+  group_by(Saglik_Riski_Seviyesi) %>%
+  summarise(
+    N = n(),
+    Yuzde = round(n() / nrow(data) * 100, 1),
+    Ort_Nabiz = round(mean(Nabiz, na.rm = TRUE), 1),
+    Ort_Sistolik = round(mean(Kan_Basinci_Sistolik, na.rm = TRUE), 1),
+    Ort_Stress_Bio = round(mean(Stress_Seviyesi_Biosensor, na.rm = TRUE), 1),
+    Ort_Stress_Bildirim = round(mean(Stress_Seviyesi_Bildirim, na.rm = TRUE), 1)
+  ) %>%
+  kable(caption = "⚕️ Sağlık Risk Seviyesine Göre Özet İstatistikler") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#e74c3c")
+```
+
+## Çapraz Tablo: Cinsiyet x Sağlık Riski
+
+```{r crosstab}
+# Çapraz tablo
+capraz <- table(data$Cinsiyet, data$Saglik_Riski_Seviyesi)
+
+capraz %>%
+  addmargins() %>%
+  kable(caption = "📊 Cinsiyet x Sağlık Risk Seviyesi Çapraz Tablosu") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#9b59b6") %>%
+  column_spec(1, bold = TRUE)
+
+# Yüzdelik dağılım
+prop.table(capraz, margin = 1) %>%
+  round(3) %>%
+  `*`(100) %>%
+  kable(caption = "📊 Satır Yüzdeleri (%)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+```
+
+---
+
+# 🎨 GÖRSEL ÖZET PANELİ
+
+```{r summary_dashboard, fig.height=12, fig.width=14}
+# 1. Yaş dağılımı
+p1 <- ggplot(data, aes(x = Yas)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 20, 
+                 fill = "#3498db", alpha = 0.7, color = "black") +
+  geom_density(color = "#e74c3c", size = 1.5) +
+  labs(title = "Yaş Dağılımı", x = "Yaş", y = "Yoğunluk") +
+  theme_minimal()
+
+# 2. Cinsiyet dağılımı
+p2 <- data %>%
+  count(Cinsiyet) %>%
+  ggplot(aes(x = "", y = n, fill = Cinsiyet)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y") +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Cinsiyet Dağılımı", x = "", y = "") +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# 3. Sağlık riski dağılımı
+p3 <- data %>%
+  count(Saglik_Riski_Seviyesi) %>%
+  ggplot(aes(x = reorder(Saglik_Riski_Seviyesi, n), y = n, 
+             fill = Saglik_Riski_Seviyesi)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  geom_text(aes(label = n), hjust = -0.2, size = 4) +
+  coord_flip() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Sağlık Risk Seviyesi", x = "", y = "Frekans") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# 4. Nabız dağılımı (cinsiyet)
+p4 <- ggplot(data, aes(x = Cinsiyet, y = Nabiz, fill = Cinsiyet)) +
+  geom_violin(alpha = 0.7) +
+  geom_boxplot(width = 0.2, alpha = 0.5) +
+  scale_fill_manual(values = c("#3498db", "#e74c3c")) +
+  labs(title = "Nabız (Cinsiyete Göre)", x = "Cinsiyet", y = "Nabız") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# 5. Ders vs Proje saatleri
+p5 <- ggplot(data, aes(x = Ders_Saatleri, y = Proje_Saatleri)) +
+  geom_hex(bins = 30) +
+  scale_fill_viridis_c(option = "C") +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = "Ders vs Proje Saatleri", 
+       x = "Ders Saatleri", y = "Proje Saatleri") +
+  theme_minimal()
+
+# 6. Uyku kalitesi dağılımı
+p6 <- data %>%
+  count(Uyku_Kalitesi) %>%
+  ggplot(aes(x = reorder(Uyku_Kalitesi, -n), y = n, fill = Uyku_Kalitesi)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  geom_text(aes(label = n), vjust = -0.3, size = 4) +
+  scale_fill_manual(values = c("#e74c3c", "#f39c12", "#2ecc71")) +
+  labs(title = "Uyku Kalitesi", x = "Uyku Kalitesi", y = "Frekans") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Paneli birleştir
+grid.arrange(p1, p2, p3, p4, p5, p6, 
+             ncol = 3,
+             top = "📊 VERİ SETİ GÖRSEL ÖZET PANELİ")
+```
+
+---
+
+# 📝 ANALİZ SONUÇLARI ÖZET
+
+```{r final_summary}
+cat("
+╔══════════════════════════════════════════════════════════════╗
+║           ÖĞRENC İ SAĞLIK VERİLERİ - ANALİZ ÖZETİ            ║
+╚══════════════════════════════════════════════════════════════╝
+
+📊 VERİ SETİ GENEL BİLGİLER:
+   • Toplam Gözlem Sayısı: ", nrow(data), "
+   • Toplam Değişken Sayısı: ", ncol(data), "
+   • Kategorik Değişken: ", length(kategorik_vars), "
+   • Sayısal Değişken: ", length(sayisal_vars), "
+   • Eksik Değer: ", sum(is.na(data)), "
+
+👥 DEMOGRAFİK BİLGİLER:
+   • Yaş Aralığı: ", min(data$Yas), "-", max(data$Yas), "
+   • Ortalama Yaş: ", round(mean(data$Yas), 1), "
+   • Kadın Sayısı: ", sum(data$Cinsiyet == 'Kadın'), " (",
+       round(sum(data$Cinsiyet == 'Kadın')/nrow(data)*100, 1), "%)
+   • Erkek Sayısı: ", sum(data$Cinsiyet == 'Erkek'), " (",
+       round(sum(data$Cinsiyet == 'Erkek')/nrow(data)*100, 1), "%)
+
+⚕️ SAĞLIK GÖSTERGELERİ:
+   • Ortalama Nabız: ", round(mean(data$Nabiz, na.rm = TRUE), 1), " bpm
+   • Ortalama Sistolik KB: ", round(mean(data$Kan_Basinci_Sistolik, na.rm = TRUE), 1), " mmHg
+   • Ortalama Diyastolik KB: ", round(mean(data$Kan_Basinci_Diyastolik, na.rm = TRUE), 1), " mmHg
+
+📚 AKADEMİK YÜK:
+   • Ortalama Ders Saatleri: ", round(mean(data$Ders_Saatleri, na.rm = TRUE), 1), " saat
+   • Ortalama Proje Saatleri: ", round(mean(data$Proje_Saatleri, na.rm = TRUE), 1), " saat
+
+🎯 SAĞLIK RİSKİ DAĞILIMI:
+   • Düşük Risk: ", sum(data$Saglik_Riski_Seviyesi == 'Dusuk'), " (",
+       round(sum(data$Saglik_Riski_Seviyesi == 'Dusuk')/nrow(data)*100, 1), "%)
+   • Orta Risk: ", sum(data$Saglik_Riski_Seviyesi == 'Orta'), " (",
+       round(sum(data$Saglik_Riski_Seviyesi == 'Orta')/nrow(data)*100, 1), "%)
+   • Yüksek Risk: ", sum(data$Saglik_Riski_Seviyesi == 'Yuksek'), " (",
+       round(sum(data$Saglik_Riski_Seviyesi == 'Yuksek')/nrow(data)*100, 1), "%)
+
+✅ Veri analizi tamamlandı!
+══════════════════════════════════════════════════════════════
+")
+```
+
+---
+
+<div style="background-color: #ecf0f1; padding: 20px; border-radius: 10px; margin-top: 30px;">
+<h3 style="color: #2c3e50; text-align: center;">📊 Rapor Sonu</h3>
+<p style="text-align: center; color: #7f8c8d;">
+Bu rapor, öğrenci sağlık verileri üzerinde kapsamlı bir keşifsel veri analizi sunmaktadır.
+<br>
+<strong>Hazırlanma Tarihi:</strong> `r Sys.Date()`
+</p>
+</div>

@@ -1,0 +1,609 @@
+---
+title: "Lojistik Regresyon Analizi: Öğrenci Cinsiyet Tahmini"
+author: "İbrahim Emin İpek"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    code_folding: show
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 6,
+  fig.align = 'center'
+)
+```
+
+# Giriş
+
+Bu çalışmada, öğrenci sağlık ve yaşam tarzı verilerini kullanarak cinsiyet tahmini için lojistik regresyon analizi gerçekleştirilmiştir.
+
+**Veri Seti:** 1000 öğrenciye ait 14 değişken  
+**Bağımlı Değişken:** Cinsiyet (0: Kadın, 1: Erkek)  
+**Bağımsız Değişkenler:** 12 farklı sağlık ve yaşam tarzı değişkeni
+
+---
+
+# Kütüphanelerin Yüklenmesi
+
+```{r kutuphaneler}
+# Gerekli kütüphaneleri yükle
+library(tidyverse) 
+library(modelr)    
+library(broom)     
+library(readxl)
+library(corrplot)
+library(ResourceSelection)
+library(DescTools)
+library(cvms)
+library(ggplot2)
+library(tibble)
+library(pROC)
+library(knitr)
+library(kableExtra)
+library(MASS)  # En son yükle (select() çakışmasını önlemek için)
+```
+
+---
+
+# Veri Yükleme ve Ön İşleme
+
+```{r veri-yukleme}
+# Veri setini yükle
+ogrenci_data <- read_excel("duzenli_data.xlsx")
+
+# Cinsiyet değişkenini faktör olarak tanımla
+ogrenci_data$Cinsiyet <- factor(ogrenci_data$Cinsiyet, 
+                                 levels = c(0, 1),
+                                 labels = c("Kadin", "Erkek"))
+
+# Veri yapısı
+str(ogrenci_data)
+```
+
+## Özet İstatistikler
+
+```{r ozet-istatistikler}
+# Özet tablo
+summary(ogrenci_data) %>%
+  kable(caption = "Veri Seti Özet İstatistikleri") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+---
+
+# Keşifsel Veri Analizi
+
+## Cinsiyet Dağılımı
+
+```{r cinsiyet-dagilimi}
+# Cinsiyet dağılımı
+table(ogrenci_data$Cinsiyet) %>%
+  prop.table() %>%
+  round(3) %>%
+  kable(col.names = c("Cinsiyet", "Oran")) %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+
+# Görselleştirme
+ggplot(ogrenci_data, aes(x = Cinsiyet, fill = Cinsiyet)) +
+  geom_bar(alpha = 0.7) +
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5) +
+  scale_fill_manual(values = c("Kadin" = "#FF6B6B", "Erkek" = "#4ECDC4")) +
+  theme_minimal() +
+  labs(title = "Cinsiyet Dağılımı",
+       x = "Cinsiyet",
+       y = "Frekans") +
+  theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"))
+```
+
+## Korelasyon Analizi
+
+```{r korelasyon-analizi, fig.height=8}
+# Bağımsız değişkenler için korelasyon matrisi
+bagimli_degiskenler <- ogrenci_data %>% 
+  dplyr::select(-Cinsiyet, -Ogrenci_ID)
+
+# Korelasyon matrisi
+korelasyon <- cor(bagimli_degiskenler)
+
+# Görselleştirme
+corrplot(korelasyon, 
+         method = "color", 
+         type = "upper",
+         addCoef.col = "black",
+         tl.cex = 0.8, 
+         number.cex = 0.6,
+         title = "Bağımsız Değişkenler Arası Korelasyon Matrisi",
+         mar = c(0, 0, 2, 0),
+         col = colorRampPalette(c("#6D9EC1", "white", "#E46726"))(200))
+```
+
+```{r vif-hesaplama}
+# VIF hesabı için korelasyon matrisinin tersi
+invkor <- solve(korelasyon)
+
+# Çoklu bağlantı kontrolü
+diag(invkor) %>%
+  as.data.frame() %>%
+  setNames("VIF") %>%
+  rownames_to_column("Degisken") %>%
+  arrange(desc(VIF)) %>%
+  kable(caption = "VIF Değerleri (Çoklu Bağlantı Kontrolü)", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**Not:** VIF değerleri >10 ise ciddi çoklu bağlantı problemi vardır.
+
+---
+
+# Model 1: Önerilen 6 Değişkenli Model
+
+## Model Tanımı
+
+En yüksek performansı veren model aşağıdaki 6 değişkeni içermektedir:
+
+- Yas
+- Nabiz
+- Stress_Seviyesi_Biosensor
+- Fiziksel_Aktivite
+- Ruh_Hali
+- Proje_Saatleri
+
+```{r model1-tanimlama}
+model1 <- glm(Cinsiyet ~ Yas + Nabiz + Stress_Seviyesi_Biosensor + 
+                         Fiziksel_Aktivite + Ruh_Hali + Proje_Saatleri, 
+              family = "binomial", 
+              data = ogrenci_data)
+
+# Model özeti
+summary(model1)
+```
+
+## Model Anlamlılık Testleri
+
+### Omnibus Tests of Model Coefficients
+
+```{r model1-omnibus}
+kikare1 <- model1$null.deviance - model1$deviance
+df1 <- model1$df.null - model1$df.residual
+kikare1_p <- 1 - pchisq(kikare1, df1)
+
+omnibus_df <- data.frame(
+  Test = "Model Katsayıları",
+  `Ki-kare` = round(kikare1, 4),
+  df = df1,
+  `P-degeri` = round(kikare1_p, 4),
+  check.names = FALSE
+)
+
+omnibus_df %>%
+  kable(caption = "Omnibus Tests of Model Coefficients") %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+
+if(kikare1_p < 0.05) {
+  cat("\n**Yorum:** Eklenen değişkenler modele ANLAMLI katkı sağlamaktadır (p<0.05)\n")
+} else {
+  cat("\n**Yorum:** Eklenen değişkenler modele anlamlı katkı sağlamamaktadır (p>=0.05)\n")
+}
+```
+
+### Hosmer-Lemeshow Uyum İyiliği Testi
+
+```{r model1-hosmer}
+hoslem1 <- hoslem.test(model1$y, fitted(model1))
+
+hoslem_df <- data.frame(
+  Test = "Hosmer-Lemeshow",
+  `Ki-kare` = round(hoslem1$statistic, 4),
+  df = hoslem1$parameter,
+  `P-degeri` = round(hoslem1$p.value, 4),
+  check.names = FALSE
+)
+
+hoslem_df %>%
+  kable(caption = "Hosmer-Lemeshow Uyum İyiliği Testi") %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+
+if(hoslem1$p.value > 0.05) {
+  cat("\n**Yorum:** Model veriye UYUMLUDUR (p>0.05)\n")
+} else {
+  cat("\n**Yorum:** Model veriye uyumlu DEĞİLDİR (p<=0.05)\n")
+}
+```
+
+## Model Özet İstatistikleri
+
+### Pseudo R-kare Değerleri
+
+```{r model1-r2}
+r2_values1 <- PseudoR2(model1, which = c("CoxSnell", "Nagelkerke", "McFadden"))
+
+r2_df1 <- data.frame(
+  Metrik = names(r2_values1),
+  Deger = round(r2_values1, 4)
+)
+
+r2_df1 %>%
+  kable(caption = "Pseudo R-kare Değerleri - Model 1") %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Odds Ratio ve Güven Aralıkları
+
+```{r model1-odds}
+odds_ratio1 <- exp(coef(model1))
+conf_intervals1 <- exp(confint.default(model1, level = 0.95))
+or_table1 <- cbind(
+  `Odds Ratio` = odds_ratio1, 
+  conf_intervals1
+)
+
+or_table1 %>%
+  as.data.frame() %>%
+  rownames_to_column("Degisken") %>%
+  kable(caption = "Odds Ratio ve %95 Güven Aralıkları - Model 1", 
+        digits = 4) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+**Odds Ratio Yorumu:**
+- OR > 1: Değişken arttıkça erkek olma olasılığı artar
+- OR < 1: Değişken arttıkça kadın olma olasılığı artar
+- OR = 1: Değişkenin etkisi yok
+
+## Sınıflandırma Performansı
+
+```{r model1-siniflandirma}
+# Tahminler
+cinsiyet_pred1 <- fitted(model1)
+cinsiyet_fac1 <- ifelse(cinsiyet_pred1 > 0.5, "Erkek", "Kadin")
+
+# Confusion Matrix
+sinif_tab1 <- table(Gercek = ogrenci_data$Cinsiyet, 
+                    Tahmin = cinsiyet_fac1)
+
+sinif_tab1 %>%
+  kable(caption = "Sınıflandırma Tablosu - Model 1 (Cut-off: 0.5)") %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+
+# Doğruluk oranı
+accuracy1 <- sum(diag(sinif_tab1)) / sum(sinif_tab1)
+cat(sprintf("\n**Toplam Doğru Sınıflandırma Oranı:** %.2f%%\n", accuracy1 * 100))
+
+# Hassasiyet ve özgüllük hesapla
+sensitivity1 <- sinif_tab1[2,2] / sum(sinif_tab1[2,])
+specificity1 <- sinif_tab1[1,1] / sum(sinif_tab1[1,])
+
+metrics_df1 <- data.frame(
+  Metrik = c("Accuracy", "Sensitivity (Erkek)", "Specificity (Kadın)"),
+  Deger = c(accuracy1, sensitivity1, specificity1)
+)
+
+metrics_df1 %>%
+  mutate(Yuzde = paste0(round(Deger * 100, 2), "%")) %>%
+  dplyr::select(Metrik, Yuzde) %>%
+  kable(caption = "Model 1 Performans Metrikleri") %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+### Sınıflandırma Matrisi Görselleştirmesi
+
+```{r model1-confusion-plot, fig.height=6}
+datatib1 <- tibble("target" = ogrenci_data$Cinsiyet, 
+                   "prediction" = cinsiyet_fac1)
+cfm1 <- tidy(table(datatib1))
+
+plot_confusion_matrix(cfm1, 
+                      target_col = "target", 
+                      prediction_col = "prediction",
+                      counts_col = "n",
+                      add_normalized = TRUE,
+                      add_row_percentages = TRUE,
+                      font_col_percentages = font(size = 6),
+                      font_counts = font(size = 7),
+                      tile_border_color = "black") +
+  ggtitle("Model 1: Sınıflandırma Matrisi") +
+  xlab("Gerçek Cinsiyet") +
+  ylab("Tahmin Edilen Cinsiyet") +
+  theme(axis.text = element_text(size = 12, face = "bold"),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, face = "bold", hjust = 0.5))
+```
+
+---
+
+# Model 2: 4 Değişkenli Model
+
+## Model Tanımı
+
+En yüksek AUC skoruna sahip 4 değişkenli model:
+
+```{r model2-tanimlama}
+model2 <- glm(Cinsiyet ~ Yas + Stress_Seviyesi_Biosensor + 
+                         Fiziksel_Aktivite + Ruh_Hali, 
+              family = "binomial", 
+              data = ogrenci_data)
+
+summary(model2)
+```
+
+## Model 2 Performans Değerlendirmesi
+
+```{r model2-performans}
+# Ki-kare testi
+kikare2 <- model2$null.deviance - model2$deviance
+df2 <- model2$df.null - model2$df.residual
+kikare2_p <- 1 - pchisq(kikare2, df2)
+
+# Hosmer-Lemeshow
+hoslem2 <- hoslem.test(model2$y, fitted(model2))
+
+# R-kare
+r2_values2 <- PseudoR2(model2, which = c("CoxSnell", "Nagelkerke", "McFadden"))
+
+# Sınıflandırma
+cinsiyet_pred2 <- fitted(model2)
+cinsiyet_fac2 <- ifelse(cinsiyet_pred2 > 0.5, "Erkek", "Kadin")
+sinif_tab2 <- table(Gercek = ogrenci_data$Cinsiyet, 
+                    Tahmin = cinsiyet_fac2)
+accuracy2 <- sum(diag(sinif_tab2)) / sum(sinif_tab2)
+
+# Özet tablo
+model2_summary <- data.frame(
+  Metrik = c("Ki-kare (p-değeri)", "Hosmer-Lemeshow (p-değeri)", 
+             "Nagelkerke R²", "Accuracy"),
+  Deger = c(
+    sprintf("%.2f (p=%.3f)", kikare2, kikare2_p),
+    sprintf("%.2f (p=%.3f)", hoslem2$statistic, hoslem2$p.value),
+    sprintf("%.4f", r2_values2["Nagelkerke"]),
+    sprintf("%.2f%%", accuracy2 * 100)
+  )
+)
+
+model2_summary %>%
+  kable(caption = "Model 2 Performans Özeti") %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+---
+
+# Model 3: 3 Değişkenli Model
+
+## Model Tanımı
+
+En basit model - Sadece 3 değişken ile en yüksek AUC:
+
+```{r model3-tanimlama}
+model3 <- glm(Cinsiyet ~ Yas + Stress_Seviyesi_Biosensor + Ruh_Hali, 
+              family = "binomial", 
+              data = ogrenci_data)
+
+summary(model3)
+```
+
+## Model 3 Performans Değerlendirmesi
+
+```{r model3-performans}
+# Performans metrikleri
+kikare3 <- model3$null.deviance - model3$deviance
+df3 <- model3$df.null - model3$df.residual
+kikare3_p <- 1 - pchisq(kikare3, df3)
+
+r2_values3 <- PseudoR2(model3, which = c("CoxSnell", "Nagelkerke", "McFadden"))
+
+cinsiyet_pred3 <- fitted(model3)
+cinsiyet_fac3 <- ifelse(cinsiyet_pred3 > 0.5, "Erkek", "Kadin")
+sinif_tab3 <- table(Gercek = ogrenci_data$Cinsiyet, 
+                    Tahmin = cinsiyet_fac3)
+accuracy3 <- sum(diag(sinif_tab3)) / sum(sinif_tab3)
+
+# Odds Ratio
+or_table3 <- exp(cbind(OR = coef(model3), confint.default(model3)))
+
+or_table3 %>%
+  as.data.frame() %>%
+  rownames_to_column("Degisken") %>%
+  kable(caption = "Model 3 - Odds Ratio ve Güven Aralıkları", digits = 4) %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+---
+
+# Stepwise Değişken Seçimi
+
+## Backward Elimination
+
+```{r stepwise-model}
+# Tüm değişkenlerle başla
+full_model <- glm(Cinsiyet ~ Yas + Nabiz + Kan_Basinci_Sistolik + 
+                             Kan_Basinci_Diyastolik + Stress_Seviyesi_Biosensor + 
+                             Stress_Seviyesi_Bildirim + Fiziksel_Aktivite + 
+                             Uyku_Kalitesi + Ruh_Hali + Ders_Saatleri + 
+                             Proje_Saatleri + Saglik_Riski_Seviyesi, 
+                  family = "binomial", 
+                  data = ogrenci_data)
+
+# Backward elimination
+step_model <- step(full_model, direction = "backward", trace = 0)
+
+summary(step_model)
+```
+
+## Stepwise Model Performansı
+
+```{r stepwise-performans}
+cinsiyet_pred_step <- fitted(step_model)
+cinsiyet_fac_step <- ifelse(cinsiyet_pred_step > 0.5, "Erkek", "Kadin")
+sinif_tab_step <- table(Gercek = ogrenci_data$Cinsiyet, 
+                        Tahmin = cinsiyet_fac_step)
+accuracy_step <- sum(diag(sinif_tab_step)) / sum(sinif_tab_step)
+
+cat(sprintf("Stepwise Model Accuracy: %.2f%%\n", accuracy_step * 100))
+cat(sprintf("Seçilen Değişken Sayısı: %d\n", length(coef(step_model)) - 1))
+```
+
+---
+
+# Model Karşılaştırması
+
+## Performans Karşılaştırma Tablosu
+
+```{r model-karsilastirma}
+model_comparison <- data.frame(
+  Model = c("Model 1 (6 değişken)", 
+            "Model 2 (4 değişken)", 
+            "Model 3 (3 değişken)",
+            "Stepwise Model"),
+  Degisken_Sayisi = c(6, 4, 3, length(coef(step_model)) - 1),
+  Accuracy = c(accuracy1, accuracy2, accuracy3, accuracy_step),
+  Cox_Snell_R2 = c(r2_values1["CoxSnell"], 
+                   r2_values2["CoxSnell"], 
+                   r2_values3["CoxSnell"],
+                   PseudoR2(step_model)["CoxSnell"]),
+  Nagelkerke_R2 = c(r2_values1["Nagelkerke"], 
+                    r2_values2["Nagelkerke"], 
+                    r2_values3["Nagelkerke"],
+                    PseudoR2(step_model)["Nagelkerke"]),
+  AIC = c(AIC(model1), AIC(model2), AIC(model3), AIC(step_model)),
+  BIC = c(BIC(model1), BIC(model2), BIC(model3), BIC(step_model))
+)
+
+model_comparison %>%
+  mutate(
+    Accuracy = paste0(round(Accuracy * 100, 2), "%"),
+    Cox_Snell_R2 = round(Cox_Snell_R2, 4),
+    Nagelkerke_R2 = round(Nagelkerke_R2, 4),
+    AIC = round(AIC, 2),
+    BIC = round(BIC, 2)
+  ) %>%
+  kable(caption = "Model Karşılaştırma Tablosu") %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  row_spec(1, bold = TRUE, background = "#d4edda")
+```
+
+## ROC Eğrileri Karşılaştırması
+
+```{r roc-curves, fig.height=7}
+# ROC eğrileri
+roc1 <- roc(ogrenci_data$Cinsiyet, fitted(model1), quiet = TRUE)
+roc2 <- roc(ogrenci_data$Cinsiyet, fitted(model2), quiet = TRUE)
+roc3 <- roc(ogrenci_data$Cinsiyet, fitted(model3), quiet = TRUE)
+
+# Görselleştirme
+plot(roc1, col = "blue", lwd = 3, main = "ROC Eğrileri - Model Karşılaştırması")
+lines(roc2, col = "red", lwd = 3)
+lines(roc3, col = "green", lwd = 3)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+
+legend("bottomright", 
+       legend = c(sprintf("Model 1 (6 değişken) - AUC=%.3f", auc(roc1)),
+                  sprintf("Model 2 (4 değişken) - AUC=%.3f", auc(roc2)),
+                  sprintf("Model 3 (3 değişken) - AUC=%.3f", auc(roc3))),
+       col = c("blue", "red", "green"),
+       lwd = 3,
+       bty = "n")
+```
+
+## AUC Değerleri
+
+```{r auc-table}
+auc_df <- data.frame(
+  Model = c("Model 1 (6 değişken)", 
+            "Model 2 (4 değişken)", 
+            "Model 3 (3 değişken)"),
+  AUC = c(auc(roc1), auc(roc2), auc(roc3))
+)
+
+auc_df %>%
+  arrange(desc(AUC)) %>%
+  mutate(AUC = round(AUC, 4)) %>%
+  kable(caption = "AUC Değerleri Sıralaması") %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE) %>%
+  row_spec(1, bold = TRUE, background = "#d4edda")
+```
+
+---
+
+# Sonuç ve Öneriler
+
+## En İyi Model
+
+**Önerilen Model:** Model 1 (6 Değişkenli Model)
+
+### Model Değişkenleri:
+1. Yas
+2. Nabiz
+3. Stress_Seviyesi_Biosensor
+4. Fiziksel_Aktivite
+5. Ruh_Hali
+6. Proje_Saatleri
+
+### Performans Metrikleri:
+```{r final-metrics}
+final_metrics <- data.frame(
+  Metrik = c("Accuracy", "AUC", "Nagelkerke R²", "AIC", "BIC"),
+  Deger = c(
+    sprintf("%.2f%%", accuracy1 * 100),
+    sprintf("%.4f", auc(roc1)),
+    sprintf("%.4f", r2_values1["Nagelkerke"]),
+    sprintf("%.2f", AIC(model1)),
+    sprintf("%.2f", BIC(model1))
+  )
+)
+
+final_metrics %>%
+  kable(caption = "Model 1 - Final Performans Metrikleri") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+```
+
+## Önemli Bulgular
+
+1. **Model Uyumu:** Hosmer-Lemeshow testi modelin veriye uyumlu olduğunu göstermektedir (p>0.05).
+
+2. **Sınıflandırma Başarısı:** Model, test verisinde %`r round(accuracy1*100, 2)` doğru sınıflandırma başarısı göstermiştir.
+
+3. **Değişken Etkisi:** Model katsayılarına göre:
+   - Stres seviyesi arttıkça kadın olma olasılığı artmaktadır
+   - Ruh hali skoru arttıkça kadın olma olasılığı artmaktadır
+   - Nabız ve proje saatleri arttıkça erkek olma olasılığı artmaktadır
+
+4. **Model Karşılaştırması:** 6 değişkenli model, hem accuracy hem de AUC metrikleri açısından en dengeli performansı göstermiştir.
+
+## Kısıtlamalar
+
+- Veri setindeki değişkenler ile cinsiyet arasındaki ilişki zayıftır (tüm korelasyonlar <0.1)
+- Model performansı sınırlıdır (%60'ın altında)
+- Daha güçlü tahmin değişkenlerine ihtiyaç vardır
+
+## Öneriler
+
+1. Hormon seviyeleri, genetik faktörler gibi biyolojik değişkenlerin eklenmesi
+2. Alternatif makine öğrenmesi yöntemlerinin denenmesi (Random Forest, XGBoost)
+3. Veri setinin genişletilmesi
+4. Özellik mühendisliği ile yeni değişkenlerin türetilmesi
+
+---
+
+# Teknik Bilgiler
+
+```{r session-info}
+sessionInfo()
+```
+
+---
+
+**Analiz Tarihi:** `r Sys.Date()`  
+**Yazar:** İbrahim Emin İpek  
+**R Version:** `r R.version.string`

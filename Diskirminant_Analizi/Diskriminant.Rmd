@@ -1,0 +1,468 @@
+---
+title: "Diskriminant Analizi"
+author: "İbrahim Emin İpek"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(knitr)
+```
+
+# Veri Hazırlama
+
+```{r}
+library(readxl)
+library(dplyr)
+library(MASS)
+
+data <- read_excel("C:/Users/User/Desktop/cda_data_verianalizi/Diskirminant Analizi/duzenli_data.xlsx")
+
+# Faktör ve numerik dönüşümler
+data$Saglik_Riski_Seviyesi <- factor(data$Saglik_Riski_Seviyesi,
+                                      levels = c(1, 2, 3),
+                                      labels = c("Düşük", "Orta", "Yüksek"))
+
+predictors <- c("Stress_Seviyesi_Biosensor", "Stress_Seviyesi_Bildirim",
+                "Ders_Saatleri", "Proje_Saatleri")
+
+for(var in predictors) {
+  data[[var]] <- as.numeric(data[[var]])
+}
+
+# Eksik gözlem kontrolü
+data <- na.omit(data[, c("Saglik_Riski_Seviyesi", predictors)])
+
+cat("Toplam Gözlem:", nrow(data), "\n")
+cat("Grup Dağılımı:\n")
+print(table(data$Saglik_Riski_Seviyesi))
+```
+
+# 1. Tek Değişkenli Normallik Testi
+
+```{r}
+shapiro_results <- data.frame()
+
+for(var in predictors) {
+  test_data <- data[[var]]
+  if(length(test_data) > 5000) test_data <- sample(test_data, 5000)
+  
+  test <- shapiro.test(test_data)
+  
+  shapiro_results <- rbind(shapiro_results, data.frame(
+    Degisken = var,
+    W = round(test$statistic, 4),
+    p_value = ifelse(test$p.value < 0.001, "< 0.001", round(test$p.value, 4)),
+    Sonuc = ifelse(test$p.value > 0.05, "Normal", "Normal Değil")
+  ))
+}
+
+kable(shapiro_results, 
+      col.names = c("Değişken", "W İstatistiği", "p-değeri", "Sonuç"),
+      caption = "Shapiro-Wilk Normallik Testi")
+```
+
+# 2. Çok Değişkenli Normallik Testi
+
+```{r}
+library(rstatix)
+
+# Orijinal veri
+mvn_test <- data %>%
+  dplyr::select(all_of(predictors)) %>%
+  mshapiro_test()
+
+mvn_original <- data.frame(
+  Test = "Mardia",
+  Istatistik = round(mvn_test$statistic, 4),
+  p_value = ifelse(mvn_test$p.value < 0.001, "< 0.001", round(mvn_test$p.value, 4)),
+  Sonuc = ifelse(mvn_test$p.value > 0.05, "Normal", "Normal Değil")
+)
+
+kable(mvn_original,
+      col.names = c("Test", "İstatistik", "p-değeri", "Sonuç"),
+      caption = "Çok Değişkenli Normallik - Orijinal Veri")
+```
+
+## Dönüşüm Denemeleri
+
+```{r}
+# Dönüşüm fonksiyonları
+apply_transformations <- function(data, vars) {
+  results <- list()
+  
+  # Box-Cox
+  tryCatch({
+    transformed <- data
+    for(var in vars) {
+      if(min(data[[var]]) > 0) {
+        bc <- boxcox(lm(data[[var]] ~ 1), plotit = FALSE)
+        lambda <- bc$x[which.max(bc$y)]
+        if(abs(lambda) < 0.01) {
+          transformed[[var]] <- log(data[[var]])
+        } else {
+          transformed[[var]] <- (data[[var]]^lambda - 1) / lambda
+        }
+      }
+    }
+    results$BoxCox <- transformed
+  }, error = function(e) {})
+  
+  # Log
+  tryCatch({
+    transformed <- data
+    for(var in vars) {
+      if(min(data[[var]]) > 0) {
+        transformed[[var]] <- log(data[[var]])
+      }
+    }
+    results$Log <- transformed
+  }, error = function(e) {})
+  
+  # Sqrt
+  tryCatch({
+    transformed <- data
+    for(var in vars) {
+      if(min(data[[var]]) >= 0) {
+        transformed[[var]] <- sqrt(data[[var]])
+      }
+    }
+    results$Sqrt <- transformed
+  }, error = function(e) {})
+  
+  # Yeo-Johnson
+  tryCatch({
+    library(car)
+    transformed <- data
+    for(var in vars) {
+      pt <- powerTransform(data[[var]])
+      transformed[[var]] <- yjPower(data[[var]], lambda = pt$lambda)
+    }
+    results$YeoJohnson <- transformed
+  }, error = function(e) {})
+  
+  return(results)
+}
+
+# Dönüşümleri uygula ve test et
+transformations <- apply_transformations(data, predictors)
+
+transform_results <- data.frame()
+
+for(trans_name in names(transformations)) {
+  test_result <- transformations[[trans_name]] %>%
+    dplyr::select(all_of(predictors)) %>%
+    mshapiro_test()
+  
+  transform_results <- rbind(transform_results, data.frame(
+    Donusum = trans_name,
+    Istatistik = round(test_result$statistic, 4),
+    p_value = ifelse(test_result$p.value < 0.001, "< 0.001", 
+                     round(test_result$p.value, 4)),
+    Sonuc = ifelse(test_result$p.value > 0.05, "Normal", "Normal Değil")
+  ))
+}
+
+kable(transform_results,
+      col.names = c("Dönüşüm", "İstatistik", "p-değeri", "Sonuç"),
+      caption = "Dönüşüm Sonrası Çok Değişkenli Normallik")
+
+# En iyi dönüşüm
+if(nrow(transform_results) > 0 && any(transform_results$Sonuc == "Normal")) {
+  cat("\n✓ Normallik sağlayan dönüşüm bulundu!\n")
+} else {
+  cat("\n✗ Hiçbir dönüşüm normalliği sağlayamadı.\n")
+  cat("Not: Diskriminant analizi normallik ihlallerine karşı robust'tur.\n")
+}
+```
+
+# 3. Korelasyon Analizi
+
+```{r}
+library(corrplot)
+
+cor_matrix <- cor(data[, predictors], method = "spearman")
+
+corrplot(cor_matrix, method = "number", type = "upper",
+         tl.col = "black", tl.srt = 45,
+         title = "Spearman Korelasyon Matrisi",
+         mar = c(0,0,2,0))
+
+kable(round(cor_matrix, 3), caption = "Korelasyon Matrisi")
+```
+
+# 4. Kovaryans Homojenliği Testi
+
+```{r}
+library(biotools)
+
+boxm_test <- boxM(data[, predictors], data$Saglik_Riski_Seviyesi)
+
+boxm_result <- data.frame(
+  Test = "Box's M",
+  Chi_Square = round(boxm_test$statistic, 4),
+  df = paste(boxm_test$parameter, collapse = ", "),
+  p_value = ifelse(boxm_test$p.value < 0.001, "< 0.001", 
+                   round(boxm_test$p.value, 4)),
+  Sonuc = ifelse(boxm_test$p.value > 0.001, "Homojen", "Heterojen")
+)
+
+kable(boxm_result,
+      col.names = c("Test", "Chi-Square", "df", "p-değeri", "Sonuç"),
+      caption = "Box's M Testi (Kovaryans Homojenliği)")
+
+cat("\nNot: p > 0.001 kritik değer olarak kabul edilir.\n")
+```
+
+## Varyans Homojenliği Testi (Levene)
+
+```{r}
+library(car)
+
+levene_results <- data.frame()
+
+for(var in predictors) {
+  levene_test <- leveneTest(as.formula(paste(var, "~ Saglik_Riski_Seviyesi")),
+                            data = data)
+  
+  levene_results <- rbind(levene_results, data.frame(
+    Degisken = var,
+    F_value = round(levene_test$`F value`[1], 4),
+    df1 = levene_test$Df[1],
+    df2 = levene_test$Df[2],
+    p_value = ifelse(levene_test$`Pr(>F)`[1] < 0.001, "< 0.001",
+                     round(levene_test$`Pr(>F)`[1], 4)),
+    Sonuc = ifelse(levene_test$`Pr(>F)`[1] > 0.05, "Homojen", "Heterojen")
+  ))
+}
+
+kable(levene_results,
+      col.names = c("Değişken", "F İstatistiği", "df1", "df2", "p-değeri", "Sonuç"),
+      caption = "Levene Testi (Varyans Homojenliği)")
+```
+
+# 5. Linear Diskriminant Analizi
+
+```{r}
+# Model
+lda_model <- lda(Saglik_Riski_Seviyesi ~ 
+                   Stress_Seviyesi_Biosensor + 
+                   Stress_Seviyesi_Bildirim + 
+                   Ders_Saatleri + 
+                   Proje_Saatleri,
+                 data = data)
+
+print(lda_model)
+```
+
+## Grup Ön Olasılıkları
+
+```{r}
+prior_df <- data.frame(
+  Grup = names(lda_model$prior),
+  Prior = round(lda_model$prior, 4),
+  Yuzde = paste0(round(lda_model$prior * 100, 2), "%")
+)
+
+kable(prior_df, caption = "Grup Ön Olasılıkları")
+```
+
+## Grup Ortalamaları
+
+```{r}
+kable(round(lda_model$means, 2), caption = "Grup Ortalamaları")
+```
+
+## Diskriminant Fonksiyon Katsayıları
+
+```{r}
+# Standardize edilmiş katsayılar
+library(candisc)
+
+model_lm <- lm(cbind(Stress_Seviyesi_Biosensor, Stress_Seviyesi_Bildirim,
+                     Ders_Saatleri, Proje_Saatleri) ~ Saglik_Riski_Seviyesi, 
+               data = data)
+
+cd_analiz <- candisc(model_lm, term = "Saglik_Riski_Seviyesi")
+
+cat("\n=== Standartlaştırılmış Katsayılar ===\n")
+print(round(cd_analiz$coeffs.std, 4))
+
+cat("\n=== Ham Katsayılar (Diskriminant Fonksiyonu) ===\n")
+print(round(cd_analiz$coeffs.raw, 4))
+
+cat("\n=== Yapı Matrisi ===\n")
+print(round(cd_analiz$structure, 4))
+
+# Sabit terim hesaplama
+cons <- apply(data[, predictors], 2, mean)
+constant <- (-cons) %*% lda_model$scaling
+
+cat("\n=== Sabit Terimler ===\n")
+print(round(constant, 4))
+```
+
+# 6. Tahmin ve Sınıflandırma
+
+```{r}
+# Tahminler
+lda_pred <- predict(lda_model)
+
+# Confusion Matrix
+confusion <- table(Gerçek = data$Saglik_Riski_Seviyesi, 
+                   Tahmin = lda_pred$class)
+
+kable(addmargins(confusion), caption = "Confusion Matrix")
+
+# Doğru sınıflandırma oranı
+classrate <- sum(diag(confusion)) / sum(confusion)
+
+# Nispi şans kriteri
+chance_criterion <- sum(lda_model$prior^2)
+
+perf_table <- data.frame(
+  Metrik = c("Doğru Sınıflandırma Oranı", 
+             "Nispi Şans Kriteri",
+             "Hata Oranı"),
+  Deger = c(paste0(round(classrate * 100, 2), "%"),
+            paste0(round(chance_criterion * 100, 2), "%"),
+            paste0(round((1 - classrate) * 100, 2), "%"))
+)
+
+kable(perf_table, caption = "Sınıflandırma Performansı")
+
+# Grup bazında doğruluk
+group_acc <- data.frame(
+  Grup = rownames(confusion),
+  Dogru = diag(confusion),
+  Toplam = rowSums(confusion),
+  Dogruluk = paste0(round(diag(confusion) / rowSums(confusion) * 100, 2), "%")
+)
+
+kable(group_acc, caption = "Grup Bazında Doğruluk")
+```
+
+## Diskriminant Skorları
+
+```{r}
+# İlk 10 gözlem
+score_table <- data.frame(
+  Gercek = data$Saglik_Riski_Seviyesi[1:10],
+  Tahmin = lda_pred$class[1:10],
+  LD1 = round(lda_pred$x[1:10, 1], 3),
+  LD2 = round(lda_pred$x[1:10, 2], 3)
+)
+
+kable(score_table, caption = "İlk 10 Gözlem - Diskriminant Skorları")
+```
+
+# 7. Görselleştirme
+
+```{r fig.width=12, fig.height=5}
+par(mfrow = c(1, 2))
+
+# LD1 histogramı
+ldahist(lda_pred$x[, 1], g = data$Saglik_Riski_Seviyesi,
+        main = "1. Diskriminant Fonksiyonu",
+        col = c("#2ecc71", "#f39c12", "#e74c3c"))
+
+# LD2 histogramı
+ldahist(lda_pred$x[, 2], g = data$Saglik_Riski_Seviyesi,
+        main = "2. Diskriminant Fonksiyonu",
+        col = c("#2ecc71", "#f39c12", "#e74c3c"))
+
+par(mfrow = c(1, 1))
+```
+
+```{r fig.width=10, fig.height=7}
+library(ggplot2)
+
+plot_data <- data.frame(
+  LD1 = lda_pred$x[, 1],
+  LD2 = lda_pred$x[, 2],
+  Grup = data$Saglik_Riski_Seviyesi
+)
+
+ggplot(plot_data, aes(x = LD1, y = LD2, color = Grup)) +
+  geom_point(size = 2.5, alpha = 0.6) +
+  stat_ellipse(level = 0.95, linewidth = 1) +
+  scale_color_manual(values = c("Düşük" = "#2ecc71", 
+                                 "Orta" = "#f39c12", 
+                                 "Yüksek" = "#e74c3c")) +
+  labs(title = "Diskriminant Analizi - Grup Ayrımı",
+       x = "1. Diskriminant Fonksiyonu",
+       y = "2. Diskriminant Fonksiyonu") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        legend.position = "right")
+```
+
+```{r fig.width=10, fig.height=8}
+# Territorial Map
+library(klaR)
+
+data$LD1 <- lda_pred$x[, 1]
+data$LD2 <- lda_pred$x[, 2]
+
+partimat(Saglik_Riski_Seviyesi ~ LD1 + LD2, 
+         data = data, 
+         method = "lda",
+         main = "Partition Map")
+```
+
+# 8. Stepwise Diskriminant Analizi
+
+```{r}
+stepwise_result <- greedy.wilks(Saglik_Riski_Seviyesi ~ 
+                                  Stress_Seviyesi_Biosensor + 
+                                  Stress_Seviyesi_Bildirim + 
+                                  Ders_Saatleri + 
+                                  Proje_Saatleri,
+                                data = data)
+
+step_df <- as.data.frame(stepwise_result$results)
+step_df <- cbind(Sira = 1:nrow(step_df), 
+                 Degisken = rownames(step_df),
+                 step_df)
+rownames(step_df) <- NULL
+
+kable(step_df[, c("Sira", "Degisken", "Wilks.lambda", "F.statistics.overall")],
+      col.names = c("Sıra", "Değişken", "Wilks' Lambda", "F İstatistiği"),
+      caption = "Stepwise Değişken Seçimi")
+
+cat("\nNot: Düşük Wilks' Lambda = Yüksek ayırt edicilik\n")
+```
+
+# 9. Özet
+
+```{r}
+cat("═══════════════════════════════════════════════════════════════\n")
+cat("                      ÖZET RAPOR\n")
+cat("═══════════════════════════════════════════════════════════════\n\n")
+
+cat("VERİ:\n")
+cat("  Gözlem Sayısı:", nrow(data), "\n")
+cat("  Grup Sayısı:", length(unique(data$Saglik_Riski_Seviyesi)), "\n")
+cat("  Değişken Sayısı:", length(predictors), "\n\n")
+
+cat("VARSAYIM TESTLERİ:\n")
+cat("  Tek Değişkenli Normallik:", 
+    ifelse(any(shapiro_results$Sonuc == "Normal"), "Kısmen Sağlandı", "İhlal Edildi"), "\n")
+cat("  Çok Değişkenli Normallik:", mvn_original$Sonuc, "\n")
+cat("  Kovaryans Homojenliği:", boxm_result$Sonuc, "\n\n")
+
+cat("MODEL PERFORMANSI:\n")
+cat("  Doğru Sınıflandırma:", paste0(round(classrate * 100, 2), "%"), "\n")
+cat("  Nispi Şans Kriteri:", paste0(round(chance_criterion * 100, 2), "%"), "\n\n")
+
+if(classrate > chance_criterion + 0.25) {
+  cat("✓ Model çok iyi performans gösteriyor\n")
+} else if(classrate > chance_criterion) {
+  cat("○ Model kabul edilebilir performans gösteriyor\n")
+} else {
+  cat("✗ Model zayıf performans gösteriyor\n")
+}
+
+cat("\n═══════════════════════════════════════════════════════════════\n")
+```

@@ -1,0 +1,299 @@
+---
+title: "Manova"
+author: "İbrahim Emin İpek"
+date: "2025-12-12"
+output:
+  html_document: default
+  word_document: default
+---
+```{r}
+library(readxl)
+data <- read_excel("C:/Users/User/Desktop/cda_data_verianalizi/Manova/duzenli_data.xlsx")
+View(data)
+```
+
+## Manova analizi için sağlanması gereken koşullar
+# Normallik testi
+
+```{r}
+# Test edilecek bağımlı değişkenler
+dependent_vars <- c("Nabiz", "Kan_Basinci_Sistolik", "Kan_Basinci_Diyastolik", "Ders_Saatleri", "Proje_Saatleri")
+
+# Her değişken için Shapiro-Wilk testi
+for (var in dependent_vars) {
+  cat("Shapiro-Wilk Test for", var, ":\n")
+  test_result <- shapiro.test(data[[var]])
+  print(test_result)
+  cat("\n")
+}
+
+```
+```{r}
+# Çok değişkenli normallik testi
+library(MVN)
+
+# Bağımlı değişkenler
+dependent_vars <- c("Nabiz", "Kan_Basinci_Sistolik", "Kan_Basinci_Diyastolik", 
+                    "Ders_Saatleri", "Proje_Saatleri")
+
+# MVN testi - YENİ VERSİYON (parametresiz)
+mvn_result <- mvn(data = data[, dependent_vars])
+
+# Sonuçları yazdırma
+print("Çok Değişkenli Normallik Test Sonuçları:")
+print(mvn_result)
+
+# Özet istatistikler
+summary(mvn_result)
+
+```
+
+# Kovaryans matrisinin homojenliği
+```{r}
+# Gerekli bağımsız değişkenin adını tanımlayın
+independent_var <- "Uyku_Kalitesi" 
+
+# Bağımlı değişkenleri listeleyin
+dependent_vars <- c("Nabiz", "Kan_Basinci_Sistolik", "Kan_Basinci_Diyastolik", 
+                    "Ders_Saatleri", "Proje_Saatleri")
+
+# Levene's Test kodu 
+if (!requireNamespace("car", quietly = TRUE)) install.packages("car")
+if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr")
+
+library(car)
+library(dplyr)
+
+# Bağımsız değişkeni faktör olarak ayarlama
+data[[independent_var]] <- as.factor(data[[independent_var]])
+
+# Levene's Test sonuçlarını saklamak için boş bir liste
+levene_results <- list()
+
+# Her bağımlı değişken için Levene's Test
+for (var in dependent_vars) {
+  if (var %in% colnames(data)) {
+    test_result <- leveneTest(as.formula(paste(var, "~", independent_var)), data = data)
+    levene_results[[var]] <- test_result
+  }
+}
+
+# Test sonuçlarını bir araya getirme
+levene_summary <- lapply(names(levene_results), function(var) {
+  data.frame(
+    Variable = var,
+    F_Value = levene_results[[var]]$`F value`[1],
+    P_Value = levene_results[[var]]$`Pr(>F)`[1]
+  )
+}) %>%
+  bind_rows()
+
+# Sonuçları yazdırma
+print("Levene's Test Sonuçları:")
+print(levene_summary)
+
+# Homojenlik ihlali olan değişkenleri belirleme
+violations <- levene_summary %>% filter(P_Value <= 0.05)
+
+# Sonuçların özeti
+if (nrow(violations) > 0) {
+  print("Homojenlik ihlali olan değişkenler:")
+  print(violations)
+} else {
+  print("Tüm değişkenler için homojenlik varsayımı sağlanmıştır.")
+}
+
+
+
+#P_Value'ları 0.05'ten büyüktür. Bu nedenle, hiçbir bağımlı değişken için homojenlik ihlali yoktur.
+
+```
+
+#Çoklu Doğrusal Bağlantı
+```{r}
+# Bağımlı değişkenleri seçin
+dependent_vars <- data[, c("Nabiz", "Kan_Basinci_Sistolik", "Kan_Basinci_Diyastolik", "Ders_Saatleri", "Proje_Saatleri")]
+
+# Korelasyon matrisi
+cor_matrix <- cor(dependent_vars)
+
+# Korelasyon matrisini yazdır
+print(cor_matrix)
+
+# Görselleştirme için
+library(ggcorrplot)
+ggcorrplot(cor_matrix, method = "circle", lab = TRUE)
+# çoklu doğrusal bağlantı sorunu yok
+```
+# Tek yönlü manova analizi
+```{r}
+# Tek yönlü MANOVA modeli: Bağımsız değişken -> Uyku_Kalitesi
+manova_tek_yon <- manova(
+  cbind(Nabiz, Kan_Basinci_Sistolik, Kan_Basinci_Diyastolik, Ders_Saatleri, Proje_Saatleri) ~ Uyku_Kalitesi,
+  data = data
+)
+
+# MANOVA sonuçlarını yazdırma
+summary(manova_tek_yon, test = "Pillai")
+# sağlık risk seviyesi değişkenin bağımlı değişkenler üzerinde anlamlı bir etkisi yoktur.
+```
+```{r}
+# Uyku_Kalitesi için ANOVA
+anova_nabiz <- aov(Nabiz ~ Uyku_Kalitesi, data = data)
+anova_kan_sistolik <- aov(Kan_Basinci_Sistolik ~ Uyku_Kalitesi, data = data)
+anova_kan_diyastolik <- aov(Kan_Basinci_Diyastolik ~ Uyku_Kalitesi, data = data)
+anova_ders <- aov(Ders_Saatleri ~Uyku_Kalitesi, data = data)
+anova_proje <- aov(Proje_Saatleri ~ Uyku_Kalitesi, data = data)
+
+# ANOVA sonuçlarını yazdırma
+summary(anova_nabiz)
+summary(anova_kan_sistolik)
+summary(anova_kan_diyastolik)
+summary(anova_ders)
+summary(anova_proje)
+# kan basıncı diyastolik dışında diğer değişkenlerin anlamlı bir etkisi yoktur
+```
+```{r}
+# Tukey testi
+# Bağımlı değişkenler
+dependent_vars <- c("Nabiz", "Kan_Basinci_Sistolik", "Kan_Basinci_Diyastolik", "Ders_Saatleri", "Proje_Saatleri")
+
+# Bağımsız değişken
+independent_var <- "Uyku_Kalitesi"
+
+# ANOVA modelleri daha önce saklanmış olmalı:
+# anova_nabiz, anova_kan_sistolik, anova_kan_diyastolik, anova_ders, anova_proje
+
+# ANOVA modellerini bir listeye koymak
+anova_models <- list(
+  Nabiz = anova_nabiz,
+  Kan_Basinci_Sistolik = anova_kan_sistolik,
+  Kan_Basinci_Diyastolik = anova_kan_diyastolik,
+  Ders_Saatleri = anova_ders,
+  Proje_Saatleri = anova_proje
+)
+
+# Tukey testi sonuçlarını saklamak için bir liste
+tukey_results <- list()
+
+# Tukey testi yapma
+for (var in names(anova_models)) {
+  tukey_test <- TukeyHSD(anova_models[[var]])
+  tukey_results[[var]] <- tukey_test
+}
+
+# Tukey sonuçlarını yazdırma
+for (var in names(tukey_results)) {
+  cat("Tukey Test Results for", var, ":\n")
+  print(tukey_results[[var]])
+  cat("\n")
+}
+
+#Gruplar arasında Uyku_Kalitesi'ne göre diyastolik kan basıncında belirgin bir fark yoktur. Ancak Yuksek ve Orta sağlık riski seviyeleri arasındaki fark, sınırda anlamlılık göstermektedir (p ≈ 0.07).
+```
+# Çift yönlü manova analizi
+
+```{r}
+# Bağımsız değişkenleri faktör olarak tanımla
+data$Uyku_Kalitesi <- as.factor(data$Uyku_Kalitesi)
+data$Ruh_Hali <- as.factor(data$Ruh_Hali)
+
+```
+
+#Çoklu varyans kovaryans matrisinin homojenliği
+```{r}
+library(biotools)
+
+# Bağımlı değişkenleri seç
+dependent_matrix <- data[, c("Nabiz", "Kan_Basinci_Sistolik", "Kan_Basinci_Diyastolik", 
+                              "Ders_Saatleri", "Proje_Saatleri")]
+
+# Grup değişkenini oluştur (iki faktörü birleştir)
+data$combined_group <- interaction(data$Uyku_Kalitesi, data$Ruh_Hali)
+
+# Box's M Testi
+boxM(dependent_matrix, grouping = data$combined_group)
+
+
+```
+
+
+```{r}
+# MANOVA Modeli
+manova_model <- manova(
+  cbind(Nabiz, Kan_Basinci_Sistolik, Kan_Basinci_Diyastolik, Ders_Saatleri, Proje_Saatleri) ~ Uyku_Kalitesi * Ruh_Hali,
+  data = data
+)
+
+# Wilks Lambda sonuçları
+summary(manova_model, test = "Wilks")
+
+```
+
+```{r}
+library(effectsize)
+
+# Partial Eta Squared hesaplama
+eta_squared(manova_model, partial = TRUE)
+
+```
+#Levene Testi (Homojenlik Homojenliği)
+```{r}
+library(rstatix)
+library(tidyr)
+data %>%
+  pivot_longer(
+    c(Nabiz, Kan_Basinci_Sistolik, Kan_Basinci_Diyastolik, Ders_Saatleri, Proje_Saatleri),
+    names_to = "variable",
+    values_to = "value"
+  ) %>%
+  group_by(variable) %>%
+  levene_test(value ~ Uyku_Kalitesi * Ruh_Hali, center = mean)
+
+```
+# Between-Subjects Test (Fark Yaratan Değişkenler)
+```{r}
+library(heplots)
+# Between-Subjects Test
+summary.aov(manova_model)
+
+# Her bağımlı değişken için eta kare hesaplama
+etasq(aov(Nabiz ~ Uyku_Kalitesi * Ruh_Hali, data = data))
+etasq(aov(Kan_Basinci_Sistolik ~ Uyku_Kalitesi * Ruh_Hali, data = data))
+etasq(aov(Kan_Basinci_Diyastolik ~ Uyku_Kalitesi * Ruh_Hali, data = data))
+etasq(aov(Ders_Saatleri ~ Uyku_Kalitesi * Ruh_Hali, data = data))
+etasq(aov(Proje_Saatleri ~ Uyku_Kalitesi * Ruh_Hali, data = data))
+
+```
+
+#Çoklu Karşılaştırmalar (Post-hoc Testler)
+```{r}
+data %>%
+  pivot_longer(
+    c(Nabiz, Kan_Basinci_Sistolik, Kan_Basinci_Diyastolik, Ders_Saatleri, Proje_Saatleri),
+    names_to = "variables",
+    values_to = "value"
+  ) %>%
+  group_by(variables) %>%
+  tukey_hsd(value ~ Uyku_Kalitesi * Ruh_Hali) -> tukey_results
+
+# Departman bazlı etkileri incelemek
+filter(tukey_results, term == "Uyku_Kalitesi")
+filter(tukey_results, term == "Ruh_Hali")
+
+```
+
+#Etkileşim Grafikleri
+```{r}
+attach(data)
+
+# Etkileşim grafikleri
+interaction.plot(Uyku_Kalitesi, Ruh_Hali, Nabiz, fun = mean, type = "l", legend = TRUE, col = 1:3, lwd = 2)
+interaction.plot(Uyku_Kalitesi, Ruh_Hali, Kan_Basinci_Sistolik, fun = mean, type = "l", legend = TRUE, col = 1:3, lwd = 2)
+interaction.plot(Uyku_Kalitesi, Ruh_Hali, Kan_Basinci_Diyastolik, fun = mean, type = "l", legend = TRUE, col = 1:3, lwd = 2)
+interaction.plot(Uyku_Kalitesi, Ruh_Hali, Ders_Saatleri, fun = mean, type = "l", legend = TRUE, col = 1:3, lwd = 2)
+interaction.plot(Uyku_Kalitesi, Ruh_Hali, Proje_Saatleri, fun = mean, type = "l", legend = TRUE, col = 1:3, lwd = 2)
+
+detach(data)
+
+```
