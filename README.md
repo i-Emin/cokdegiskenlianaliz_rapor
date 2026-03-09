@@ -1,6 +1,6 @@
 # Öğrenci Sağlık Verileri Çok Değişkenli İstatistiksel Analizi 📊
 
-Bu depo, öğrenci sağlık verileri üzerine gerçekleştirilen kapsamlı bir çok değişkenli istatistiksel analiz projesini içermektedir. Proje kapsamında **7 farklı istatistiksel analiz** yöntemi uygulanmış ve tüm bu süreçler endüstri standardı olan **R, SPSS ve SAS** yazılımları/dilleri ile paralel olarak yürütülmüştür. 
+Bu depo, öğrenci sağlık verileri üzerine gerçekleştirilen kapsamlı bir çok değişkenli istatistiksel analiz projesini içermektedir. Proje kapsamında **5 farklı istatistiksel analiz** yöntemi uygulanmış ve tüm bu süreçler endüstri standardı olan **R, SPSS ve SAS** yazılımları/dilleri ile paralel olarak yürütülmüştür. 
 
 Sürecin tamamını, istatistiksel varsayımların kontrolünü ve bulguların akademik bir dille yorumlanmasını içeren **97 sayfalık kapsamlı analiz raporu** da projeye dahildir.
 
@@ -8,14 +8,14 @@ Sürecin tamamını, istatistiksel varsayımların kontrolünü ve bulguların a
 
 Veri seti üzerinde uygulanan temel çok değişkenli istatistiksel yöntemler şunlardır:
 
-1. **Keşifsel Veri Analizi ve Ön İşleme:** Verilerin analize hazır hale getirilmesi, kayıp veri ve uç değer kontrolleri.
-2. **Temel Bileşenler Analizi (TBA) ve Faktör Analizi:** Boyut indirgeme ve gizli yapıların ortaya çıkarılması.
-3. **MANOVA (Çok Değişkenli Varyans Analizi):** Bağımsız değişkenlerin birden fazla bağımlı değişken üzerindeki ortak etkisinin incelenmesi.
-4. **Diskriminant Analizi:** Gruplar arası ayrımı en üst düzeye çıkaran fonksiyonların elde edilmesi ve sınıflandırma.
-5. **Lojistik Regresyon:** Kategorik bağımlı değişkenin olasılık temelli modellenmesi.
-6. **Kümeleme Analizi:** Gözlemlerin benzerliklerine göre doğal gruplara (kümelere) ayrılması.
+0. **Keşifsel Veri Analizi ve Ön İşleme:** Verilerin analize hazır hale getirilmesi, kayıp veri ve uç değer kontrolleri.
+1. **Temel Bileşenler Analizi (TBA) ve Faktör Analizi:** Boyut indirgeme ve gizli yapıların ortaya çıkarılması.
+2. **MANOVA (Çok Değişkenli Varyans Analizi):** Bağımsız değişkenlerin birden fazla bağımlı değişken üzerindeki ortak etkisinin incelenmesi.
+3. **Diskriminant Analizi:** Gruplar arası ayrımı en üst düzeye çıkaran fonksiyonların elde edilmesi ve sınıflandırma.
+4. **Lojistik Regresyon:** Kategorik bağımlı değişkenin olasılık temelli modellenmesi.
+5. **Kümeleme Analizi:** Gözlemlerin benzerliklerine göre doğal gruplara (kümelere) ayrılması.
 
-*(Not: 7. analiz veya diğer eklediğiniz modelleri buraya ekleyebilirsiniz).*
+
 
 ## 🛠️ Kullanılan Teknolojiler ve Araçlar
 Aynı analizler, sonuçların tutarlılığını test etmek ve farklı yazılımlardaki yetkinliği göstermek amacıyla üç farklı ortamda kodlanmıştır:
